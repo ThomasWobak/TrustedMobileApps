@@ -12,6 +12,16 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.*
 import com.example.mobileappstrusted.ui.theme.MobileAppsTrustedTheme
+import android.Manifest
+import android.media.MediaRecorder
+
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+
+import androidx.compose.runtime.*
+import androidx.compose.ui.platform.LocalContext
+
+import java.io.File
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -68,12 +78,80 @@ fun HomeScreen(navController: NavHostController) {
 
 @Composable
 fun RecordAudioScreen() {
+    val context = LocalContext.current
+    var isRecording by remember { mutableStateOf(false) }
+    var recorder: MediaRecorder? by remember { mutableStateOf(null) }
+    var statusText by remember { mutableStateOf("Press to start recording") }
+
+    val requestPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+        onResult = { granted ->
+            statusText = if (granted) {
+                "Permission granted. Ready to record."
+            } else {
+                "Permission denied."
+            }
+        }
+    )
+
+    LaunchedEffect(Unit) {
+        requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+    }
+
     Surface(modifier = Modifier.fillMaxSize()) {
-        Text(
-            text = "Record Audio Screen",
-            style = MaterialTheme.typography.headlineMedium,
-            modifier = Modifier.padding(16.dp)
-        )
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = statusText,
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.padding(bottom = 16.dp)
+            )
+
+            Button(
+                onClick = {
+                    if (!isRecording) {
+                        try {
+                            val outputFile = File(
+                                context.externalCacheDir,
+                                "audiorecord_${System.currentTimeMillis()}.mp3"
+                            ).absolutePath
+
+                            recorder = MediaRecorder().apply {
+                                setAudioSource(MediaRecorder.AudioSource.MIC)
+                                setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                                setOutputFile(outputFile)
+                                prepare()
+                                start()
+                            }
+                            statusText = "Recording..."
+                            isRecording = true
+                        } catch (e: Exception) {
+                            statusText = "Recording failed: ${e.message}"
+                        }
+                    } else {
+                        try {
+                            recorder?.apply {
+                                stop()
+                                release()
+                            }
+                            recorder = null
+                            isRecording = false
+                            statusText = "Recording stopped"
+                        } catch (e: Exception) {
+                            statusText = "Stop failed: ${e.message}"
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(if (isRecording) "Stop Recording" else "Start Recording")
+            }
+        }
     }
 }
 
