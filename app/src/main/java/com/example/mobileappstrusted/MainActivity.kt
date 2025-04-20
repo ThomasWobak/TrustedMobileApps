@@ -28,6 +28,8 @@ import androidx.navigation.navArgument
 import androidx.compose.foundation.Canvas
 import androidx.compose.ui.graphics.Color
 import java.io.File
+import kotlin.math.abs
+
 //TODO: Import audio from filesystem
 //TODO: Be able to read .wav files
 //TODO: improve audio recording
@@ -206,10 +208,17 @@ fun RecordAudioScreen(navController: NavHostController) {
 }
 
 
-
 @Composable
 fun EditAudioScreen(filePath: String) {
-    val waveform = remember { generateFakeWaveform(500) } // 500 bars for smoothness
+    val context = LocalContext.current
+    var amplitudes by remember { mutableStateOf<List<Int>>(emptyList()) }
+
+    LaunchedEffect(filePath) {
+        val file = File(filePath)
+        if (file.exists()) {
+            amplitudes = extractAmplitudesFromWav(file)
+        }
+    }
 
     Surface(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -225,21 +234,17 @@ fun EditAudioScreen(filePath: String) {
                 modifier = Modifier.padding(bottom = 16.dp)
             )
 
-            WaveformView(waveform)
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            Text(
-                text = "This is a placeholder waveform.",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            if (amplitudes.isNotEmpty()) {
+                WaveformView(amplitudes)
+            } else {
+                Text("Loading waveform...")
+            }
         }
     }
 }
 @Composable
 fun WaveformView(amplitudes: List<Int>) {
-    val barWidth = 3.dp
+    val barWidth = 2.dp
     val space = 1.dp
 
     Canvas(
@@ -247,13 +252,14 @@ fun WaveformView(amplitudes: List<Int>) {
             .fillMaxWidth()
             .height(100.dp)
     ) {
+        val maxAmp = amplitudes.maxOrNull()?.toFloat()?.coerceAtLeast(1f) ?: 1f
         val totalBars = (size.width / (barWidth.toPx() + space.toPx())).toInt()
         val step = (amplitudes.size / totalBars).coerceAtLeast(1)
 
         for (i in 0 until totalBars) {
             val amplitude = amplitudes.getOrNull(i * step) ?: 0
-            val normalized = amplitude / 100f
-            val height = normalized * size.height.coerceAtMost(100f)
+            val normalized = amplitude / maxAmp
+            val height = normalized * size.height
 
             drawLine(
                 color = Color.Blue,
@@ -271,13 +277,24 @@ fun WaveformView(amplitudes: List<Int>) {
     }
 }
 
-fun generateFakeWaveform(size: Int): List<Int> {
-    return List(size) { i ->
-        val base = (Math.sin(i / 10.0) + 1) / 2  // sine wave
-        val noise = Math.random() * 0.2          // slight random variation
-        ((base + noise) * 100).toInt().coerceAtMost(100)
+fun extractAmplitudesFromWav(file: File, sampleEvery: Int = 200): List<Int> {
+    val bytes = file.readBytes()
+    if (bytes.size <= 44) return emptyList()
+
+    val amplitudes = mutableListOf<Int>()
+    var i = 44 // Skip WAV header
+    while (i + 1 < bytes.size) {
+        // Little-endian 16-bit signed PCM
+        val low = bytes[i].toInt() and 0xFF
+        val high = bytes[i + 1].toInt()
+        val sample = (high shl 8) or low
+        val amplitude = abs(sample)
+        amplitudes.add(amplitude)
+        i += 2 * sampleEvery // sampleEvery: controls how many samples we skip
     }
+    return amplitudes
 }
+
 
 
 
