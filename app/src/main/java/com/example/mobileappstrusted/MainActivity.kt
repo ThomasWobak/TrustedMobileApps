@@ -20,6 +20,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
+import androidx.navigation.navArgument
 
 import java.io.File
 
@@ -39,8 +40,14 @@ fun AppNavigation() {
     val navController = rememberNavController()
     NavHost(navController = navController, startDestination = "home") {
         composable("home") { HomeScreen(navController) }
-        composable("record_audio") { RecordAudioScreen() }
-        composable("edit_audio") { EditAudioScreen() }
+        composable("record_audio") { RecordAudioScreen(navController) }
+        composable(
+            "edit_audio/{filePath}",
+            arguments = listOf(navArgument("filePath") { defaultValue = "" })
+        ) { backStackEntry ->
+            val filePath = backStackEntry.arguments?.getString("filePath") ?: ""
+            EditAudioScreen(filePath)
+        }
     }
 }
 
@@ -77,11 +84,12 @@ fun HomeScreen(navController: NavHostController) {
 }
 
 @Composable
-fun RecordAudioScreen() {
+fun RecordAudioScreen(navController: NavHostController) {
     val context = LocalContext.current
     var isRecording by remember { mutableStateOf(false) }
     var recorder: MediaRecorder? by remember { mutableStateOf(null) }
     var statusText by remember { mutableStateOf("Press to start recording") }
+    var recordedFilePath by remember { mutableStateOf<String?>(null) }
 
     val requestPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
@@ -130,6 +138,7 @@ fun RecordAudioScreen() {
                             }
                             statusText = "Recording..."
                             isRecording = true
+                            recordedFilePath = outputFile
                         } catch (e: Exception) {
                             statusText = "Recording failed: ${e.message}"
                         }
@@ -151,20 +160,42 @@ fun RecordAudioScreen() {
             ) {
                 Text(if (isRecording) "Stop Recording" else "Start Recording")
             }
+
+            if (!isRecording && recordedFilePath != null) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(
+                    onClick = {
+                        val encodedPath = java.net.URLEncoder.encode(recordedFilePath, "utf-8")
+                        navController.navigate("edit_audio/$encodedPath")
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Go to Edit Screen")
+                }
+            }
         }
     }
 }
 
+
 @Composable
-fun EditAudioScreen() {
+fun EditAudioScreen(filePath: String) {
     Surface(modifier = Modifier.fillMaxSize()) {
-        Text(
-            text = "Edit Audio Screen",
-            style = MaterialTheme.typography.headlineMedium,
-            modifier = Modifier.padding(16.dp)
-        )
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "Edit Audio Screen",
+                style = MaterialTheme.typography.headlineMedium,
+                modifier = Modifier.padding(bottom = 16.dp)
+            )
+            Text(
+                text = "Loaded file: $filePath",
+                style = MaterialTheme.typography.bodyLarge
+            )
+
+        }
     }
 }
+
 
 @Preview(showBackground = true)
 @Composable
