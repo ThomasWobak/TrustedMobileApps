@@ -12,7 +12,11 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.*
 import com.example.mobileappstrusted.ui.theme.MobileAppsTrustedTheme
+
+
 import android.Manifest
+import android.media.AudioFormat
+import android.media.AudioRecord
 import android.media.MediaRecorder
 
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -99,9 +103,9 @@ fun HomeScreen(navController: NavHostController) {
 fun RecordAudioScreen(navController: NavHostController) {
     val context = LocalContext.current
     var isRecording by remember { mutableStateOf(false) }
-    var recorder: MediaRecorder? by remember { mutableStateOf(null) }
     var statusText by remember { mutableStateOf("Press to start recording") }
     var recordedFilePath by remember { mutableStateOf<String?>(null) }
+    var recordingThread: Thread? by remember { mutableStateOf(null) }
 
     val requestPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
@@ -116,6 +120,50 @@ fun RecordAudioScreen(navController: NavHostController) {
 
     LaunchedEffect(Unit) {
         requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+    }
+
+    val startRecording = {
+        val outputFile = File(context.externalCacheDir, "recording_${System.currentTimeMillis()}.wav")
+        val sampleRate = 44100
+        val channelConfig = AudioFormat.CHANNEL_IN_MONO
+        val audioFormat = AudioFormat.ENCODING_PCM_16BIT
+        val bufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
+        val audioRecord = AudioRecord(
+            MediaRecorder.AudioSource.MIC,
+            sampleRate,
+            channelConfig,
+            audioFormat,
+            bufferSize
+        )
+
+        val audioData = mutableListOf<Byte>()
+        isRecording = true
+        statusText = "Recording..."
+
+        audioRecord.startRecording()
+
+        val thread = Thread {
+            val buffer = ByteArray(bufferSize)
+            while (isRecording) {
+                val read = audioRecord.read(buffer, 0, buffer.size)
+                if (read > 0) {
+                    audioData.addAll(buffer.copyOf(read).toList())
+                }
+            }
+            audioRecord.stop()
+            audioRecord.release()
+
+            val wavBytes = audioData.toByteArray()
+            writeWavFile(wavBytes, outputFile, sampleRate, 1, 16)
+            recordedFilePath = outputFile.absolutePath
+        }
+        thread.start()
+        recordingThread = thread
+    }
+
+    val stopRecording = {
+        isRecording = false
+        statusText = "Recording stopped"
     }
 
     Surface(modifier = Modifier.fillMaxSize()) {
@@ -133,40 +181,8 @@ fun RecordAudioScreen(navController: NavHostController) {
 
             Button(
                 onClick = {
-                    if (!isRecording) {
-                        try {
-                            val outputFile = File(
-                                context.externalCacheDir,
-                                "audiorecord_${System.currentTimeMillis()}.mp3"
-                            ).absolutePath
-
-                            recorder = MediaRecorder().apply {
-                                setAudioSource(MediaRecorder.AudioSource.MIC)
-                                setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-                                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                                setOutputFile(outputFile)
-                                prepare()
-                                start()
-                            }
-                            statusText = "Recording..."
-                            isRecording = true
-                            recordedFilePath = outputFile
-                        } catch (e: Exception) {
-                            statusText = "Recording failed: ${e.message}"
-                        }
-                    } else {
-                        try {
-                            recorder?.apply {
-                                stop()
-                                release()
-                            }
-                            recorder = null
-                            isRecording = false
-                            statusText = "Recording stopped"
-                        } catch (e: Exception) {
-                            statusText = "Stop failed: ${e.message}"
-                        }
-                    }
+                    if (!isRecording) startRecording()
+                    else stopRecording()
                 },
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -188,6 +204,7 @@ fun RecordAudioScreen(navController: NavHostController) {
         }
     }
 }
+
 
 
 @Composable
@@ -270,4 +287,58 @@ fun DefaultPreview() {
     MobileAppsTrustedTheme {
         HomeScreen(rememberNavController())
     }
+}
+
+
+/***
+ * Written by ChatGPT, dont know how exactly it works
+ */
+fun writeWavFile(pcmData: ByteArray, outputFile: File, sampleRate: Int, channels: Int, bitDepth: Int) {
+    val byteRate = sampleRate * channels * bitDepth / 8
+    val totalDataLen = pcmData.size + 36
+    val header = ByteArray(44)
+
+    // RIFF header
+    header[0] = 'R'.code.toByte()
+    header[1] = 'I'.code.toByte()
+    header[2] = 'F'.code.toByte()
+    header[3] = 'F'.code.toByte()
+    writeInt(header, 4, totalDataLen)
+    header[8] = 'W'.code.toByte()
+    header[9] = 'A'.code.toByte()
+    header[10] = 'V'.code.toByte()
+    header[11] = 'E'.code.toByte()
+    header[12] = 'f'.code.toByte()
+    header[13] = 'm'.code.toByte()
+    header[14] = 't'.code.toByte()
+    header[15] = ' '.code.toByte()
+    writeInt(header, 16, 16)
+    writeShort(header, 20, 1) // PCM
+    writeShort(header, 22, channels.toShort())
+    writeInt(header, 24, sampleRate)
+    writeInt(header, 28, byteRate)
+    writeShort(header, 32, (channels * bitDepth / 8).toShort())
+    writeShort(header, 34, bitDepth.toShort())
+    header[36] = 'd'.code.toByte()
+    header[37] = 'a'.code.toByte()
+    header[38] = 't'.code.toByte()
+    header[39] = 'a'.code.toByte()
+    writeInt(header, 40, pcmData.size)
+
+    outputFile.outputStream().use {
+        it.write(header)
+        it.write(pcmData)
+    }
+}
+
+private fun writeInt(header: ByteArray, offset: Int, value: Int) {
+    header[offset] = (value and 0xff).toByte()
+    header[offset + 1] = ((value shr 8) and 0xff).toByte()
+    header[offset + 2] = ((value shr 16) and 0xff).toByte()
+    header[offset + 3] = ((value shr 24) and 0xff).toByte()
+}
+
+private fun writeShort(header: ByteArray, offset: Int, value: Short) {
+    header[offset] = (value.toInt() and 0xff).toByte()
+    header[offset + 1] = ((value.toInt() shr 8) and 0xff).toByte()
 }
