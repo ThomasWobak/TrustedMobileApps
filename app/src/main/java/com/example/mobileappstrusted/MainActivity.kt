@@ -21,9 +21,21 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.navArgument
-
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.graphics.Color
 import java.io.File
-
+//TODO: Import audio from filesystem
+//TODO: Be able to read .wav files
+//TODO: improve audio recording
+//TODO: Implement looking at audio
+//TODO: Implement cutting of audio
+//TODO: Implement removing of audio
+//TODO: Implement menu in editing screen
+//TODO: Implement exporting of project
+//TODO: Implement adding hash value when cutting/removing
+//TODO: Implement hash tree to editing steps
+//TODO: Implement validate Recording
+//TODO: Implement going back using strg+z using hash tree
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -180,21 +192,76 @@ fun RecordAudioScreen(navController: NavHostController) {
 
 @Composable
 fun EditAudioScreen(filePath: String) {
+    val waveform = remember { generateFakeWaveform(500) } // 500 bars for smoothness
+
     Surface(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                text = "Edit Audio Screen",
+                text = "Edit Audio",
                 style = MaterialTheme.typography.headlineMedium,
                 modifier = Modifier.padding(bottom = 16.dp)
             )
+
             Text(
-                text = "Loaded file: $filePath",
-                style = MaterialTheme.typography.bodyLarge
+                text = "Loaded file: ${File(filePath).name}",
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.padding(bottom = 16.dp)
             )
 
+            WaveformView(waveform)
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Text(
+                text = "This is a placeholder waveform.",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
+@Composable
+fun WaveformView(amplitudes: List<Int>) {
+    val barWidth = 3.dp
+    val space = 1.dp
+
+    Canvas(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(100.dp)
+    ) {
+        val totalBars = (size.width / (barWidth.toPx() + space.toPx())).toInt()
+        val step = (amplitudes.size / totalBars).coerceAtLeast(1)
+
+        for (i in 0 until totalBars) {
+            val amplitude = amplitudes.getOrNull(i * step) ?: 0
+            val normalized = amplitude / 100f
+            val height = normalized * size.height.coerceAtMost(100f)
+
+            drawLine(
+                color = Color.Blue,
+                start = androidx.compose.ui.geometry.Offset(
+                    x = i * (barWidth.toPx() + space.toPx()),
+                    y = size.height / 2 - height / 2
+                ),
+                end = androidx.compose.ui.geometry.Offset(
+                    x = i * (barWidth.toPx() + space.toPx()),
+                    y = size.height / 2 + height / 2
+                ),
+                strokeWidth = barWidth.toPx()
+            )
+        }
+    }
+}
+
+fun generateFakeWaveform(size: Int): List<Int> {
+    return List(size) { i ->
+        val base = (Math.sin(i / 10.0) + 1) / 2  // sine wave
+        val noise = Math.random() * 0.2          // slight random variation
+        ((base + noise) * 100).toInt().coerceAtMost(100)
+    }
+}
+
 
 
 @Preview(showBackground = true)
