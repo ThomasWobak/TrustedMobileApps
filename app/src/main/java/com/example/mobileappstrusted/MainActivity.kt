@@ -10,10 +10,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.example.mobileappstrusted.ui.theme.MobileAppsTrustedTheme
 
-//TODO: Import audio from filesystem
-//TODO: Be able to read .wav files
-//TODO: improve audio recording
-//TODO: Implement looking at audio
+//TODO: Import audio from filesystem DONE
+//TODO: Be able to read .wav files DONE
+//TODO: Implement looking at audio DONE
+//TODO: Implement playback of audio DONE
 //TODO: Implement cutting of audio
 //TODO: Implement removing of audio
 //TODO: Implement menu in editing screen
@@ -22,6 +22,7 @@ import com.example.mobileappstrusted.ui.theme.MobileAppsTrustedTheme
 //TODO: Implement hash tree to editing steps
 //TODO: Implement validate Recording
 //TODO: Implement going back using strg+z using hash tree
+//TODO: improve audio recording
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
