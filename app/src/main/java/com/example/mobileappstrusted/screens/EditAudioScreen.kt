@@ -2,14 +2,13 @@
 package com.example.mobileappstrusted.screens
 
 import android.media.MediaPlayer
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.example.mobileappstrusted.components.WaveformView
+import com.example.mobileappstrusted.components.NoPathGivenScreen
 import java.io.File
 import kotlin.math.abs
 
@@ -91,30 +90,6 @@ fun EditAudioScreen(filePath: String) {
     }
 }
 
-/**
- * If `filePath` is blank or missing, show this placeholder UI.
- */
-@Composable
-fun NoPathGivenScreen() {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(
-            text = "No audio file provided",
-            style = MaterialTheme.typography.headlineMedium
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = "Please record or import a file first.",
-            style = MaterialTheme.typography.bodyLarge
-        )
-    }
-}
-
 fun extractAmplitudesFromWav(file: File, sampleEvery: Int = 200): List<Int> {
     val bytes = file.readBytes()
     if (bytes.size <= 44) return emptyList()
@@ -128,39 +103,4 @@ fun extractAmplitudesFromWav(file: File, sampleEvery: Int = 200): List<Int> {
         i += 2 * sampleEvery
     }
     return amplitudes
-}
-
-@Composable
-fun WaveformView(amplitudes: List<Int>) {
-    val barWidth = 2.dp
-    val space = 1.dp
-
-    Canvas(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(100.dp)
-    ) {
-        val maxAmp = amplitudes.maxOrNull()?.toFloat()?.coerceAtLeast(1f) ?: 1f
-        val totalBars = (size.width / (barWidth.toPx() + space.toPx()))
-            .toInt()
-            .coerceAtLeast(1)
-        val step = (amplitudes.size / totalBars).coerceAtLeast(1)
-
-        for (i in 0 until totalBars) {
-            val amplitude = amplitudes.getOrNull(i * step) ?: 0
-            val normalized = amplitude / maxAmp
-            val lineHeight = normalized * size.height
-
-            val x = i * (barWidth.toPx() + space.toPx())
-            val yStart = size.height / 2 - lineHeight / 2
-            val yEnd = size.height / 2 + lineHeight / 2
-
-            drawLine(
-                color = Color.Blue,
-                start = androidx.compose.ui.geometry.Offset(x, yStart),
-                end = androidx.compose.ui.geometry.Offset(x, yEnd),
-                strokeWidth = barWidth.toPx()
-            )
-        }
-    }
 }
