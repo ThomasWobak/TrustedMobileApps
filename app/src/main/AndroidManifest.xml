@@ -16,11 +16,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.MobileAppsTrusted"
         tools:targetApi="31">
-        <!-- Record audio activity -->
-        <activity android:name=".RecordAudioActivity" />
 
-        <!-- Edit audio activity -->
-        <activity android:name=".EditAudioActivity" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

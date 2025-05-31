@@ -1,95 +1,68 @@
-// RecordAudioActivity.kt
-package com.example.mobileappstrusted
+// RecordAudioScreenWithImport.kt
+package com.example.mobileappstrusted.screens
 
 import android.Manifest
-import android.content.ContentResolver
 import android.content.Context
-import android.content.Intent
+import android.content.ContentResolver
+import android.net.Uri
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
-import android.net.Uri
-import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.activity.result.contract.ActivityResultContracts.OpenDocument
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import com.example.mobileappstrusted.ui.theme.MobileAppsTrustedTheme
-import java.io.*
+import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
 
-class RecordAudioActivity : ComponentActivity() {
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        setContent {
-            MobileAppsTrustedTheme {
-                RecordAudioScreen { filePath ->
-                    // Whenever recording is finished OR an audio file is imported,
-                    // we launch EditAudioActivity with the absolute file path.
-                    val intent = Intent(this, EditAudioActivity::class.java)
-                    intent.putExtra("filePath", filePath)
-                    startActivity(intent)
-                }
-            }
-        }
-    }
-}
 
 @Composable
 fun RecordAudioScreen(onRecordingComplete: (String) -> Unit) {
     val context = LocalContext.current
+
     var isRecording by remember { mutableStateOf(false) }
-    var statusText by remember { mutableStateOf("Press to start recording") }
+    var statusText by remember { mutableStateOf("Press to start recording or import an audio file") }
     var recordingThread: Thread? by remember { mutableStateOf(null) }
 
-    // Request RECORD_AUDIO permission at startup
+    // Request RECORD_AUDIO permission
     val requestPermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission(),
-        onResult = { granted ->
-            statusText = if (granted) {
-                "Permission granted. Ready to record."
-            } else {
-                "Permission denied. Cannot record."
-            }
-        }
-    )
-
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        statusText = if (granted) "Ready to record." else "Permission denied."
+    }
     LaunchedEffect(Unit) {
         requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
     }
 
-    // === Launcher for importing an existing audio file ===
+    // Launcher for picking an existing audio file (MIME "audio/*")
     val importAudioLauncher = rememberLauncherForActivityResult(
-        contract = OpenDocument(),
-        onResult = { uri: Uri? ->
-            uri?.let {
-                val importedFile = copyUriToCache(
-                    context = context,
-                    uri = it,
-                    prefix = "imported_",
-                    suffix = getFileExtensionFromUri(context.contentResolver, it) ?: ".wav"
-                )
-                if (importedFile != null) {
-                    statusText = "Imported: ${importedFile.name}"
-                    onRecordingComplete(importedFile.absolutePath)
-                } else {
-                    statusText = "Failed to import file."
-                }
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        uri?.let {
+            val importedFile = copyUriToCache(
+                context = context,
+                uri = it,
+                prefix = "imported_",
+                suffix = getFileExtensionFromUri(context.contentResolver, it) ?: ".wav"
+            )
+            if (importedFile != null) {
+                statusText = "Imported: ${importedFile.name}"
+                onRecordingComplete(importedFile.absolutePath)
+            } else {
+                statusText = "Failed to import file."
             }
         }
-    )
+    }
 
-    // Lambda to start recording from the microphone and write to a WAV in cache
     val startRecording = {
         val outputFile = File(
-            context.externalCacheDir,
-            "recording_${System.currentTimeMillis()}.wav"
+            context.externalCacheDir ?: context.cacheDir,
+            "record_${System.currentTimeMillis()}.wav"
         )
         val sampleRate = 44100
         val bufferSize = AudioRecord.getMinBufferSize(
@@ -142,15 +115,14 @@ fun RecordAudioScreen(onRecordingComplete: (String) -> Unit) {
             verticalArrangement = Arrangement.Center
         ) {
             Text(
-                text = statusText,
+                statusText,
                 style = MaterialTheme.typography.bodyLarge,
                 modifier = Modifier.padding(bottom = 16.dp)
             )
 
             Button(
                 onClick = {
-                    if (!isRecording) startRecording()
-                    else stopRecording()
+                    if (!isRecording) startRecording() else stopRecording()
                 },
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -172,9 +144,8 @@ fun RecordAudioScreen(onRecordingComplete: (String) -> Unit) {
 }
 
 /**
- * Copies the content pointed to by [uri] into a new file in the app's cache directory.
- * The new file will have the given [prefix] and [suffix]. Returns the resulting File,
- * or null on failure.
+ * Copies a content URI to the app's cache directory, using [prefix] + timestamp + [suffix].
+ * Returns the File, or null if failure.
  */
 fun copyUriToCache(
     context: Context,
@@ -187,7 +158,7 @@ fun copyUriToCache(
         val destFile = File(cacheDir, prefix + System.currentTimeMillis() + suffix)
         context.contentResolver.openInputStream(uri)?.use { input ->
             FileOutputStream(destFile).use { output ->
-                val buf = ByteArray(4 * 1024)
+                val buf = ByteArray(4096)
                 var bytesRead: Int
                 while (input.read(buf).also { bytesRead = it } != -1) {
                     output.write(buf, 0, bytesRead)
@@ -203,25 +174,20 @@ fun copyUriToCache(
 }
 
 /**
- * Tries to extract a file extension (including the dot) from the [Uri], using ContentResolver's metadata.
- * Returns null if it cannot determine an extension.
+ * Attempts to infer a file extension (e.g. ".wav", ".mp3") from the URI's mime type or path.
  */
 fun getFileExtensionFromUri(resolver: ContentResolver, uri: Uri): String? {
-    // First, try to get it from the MIME type
     val mimeType = resolver.getType(uri)
     if (mimeType != null) {
-        val extension = when (mimeType) {
-            "audio/wav", "audio/x-wav" -> ".wav"
-            "audio/mpeg" -> ".mp3"
-            "audio/mp4", "audio/aac", "audio/x-m4a" -> ".m4a"
-            "audio/ogg" -> ".ogg"
-            "audio/flac" -> ".flac"
-            else -> null
+        when (mimeType) {
+            "audio/wav", "audio/x-wav" -> return ".wav"
+            "audio/mpeg" -> return ".mp3"
+            "audio/mp4", "audio/aac", "audio/x-m4a" -> return ".m4a"
+            "audio/ogg" -> return ".ogg"
+            "audio/flac" -> return ".flac"
         }
-        if (extension != null) return extension
     }
-
-    // Fallback: try to parse from the document URI itself
+    // Fallback: get extension from URI path
     val path = uri.path ?: return null
     val lastDot = path.lastIndexOf('.')
     if (lastDot != -1 && lastDot < path.length - 1) {
@@ -230,6 +196,7 @@ fun getFileExtensionFromUri(resolver: ContentResolver, uri: Uri): String? {
     return null
 }
 
+/** WAV-writing helper (exactly as before) */
 fun writeWavFile(
     pcmData: ByteArray,
     outputFile: File,
@@ -257,13 +224,13 @@ fun writeWavFile(
     header[13] = 'm'.code.toByte()
     header[14] = 't'.code.toByte()
     header[15] = ' '.code.toByte()
-    writeInt(header, 16, 16)                   // Subchunk1Size (16 for PCM)
-    writeShort(header, 20, 1)                  // AudioFormat (1 for PCM)
-    writeShort(header, 22, channels.toShort()) // NumChannels
-    writeInt(header, 24, sampleRate)           // SampleRate
-    writeInt(header, 28, byteRate)             // ByteRate
-    writeShort(header, 32, (channels * bitDepth / 8).toShort()) // BlockAlign
-    writeShort(header, 34, bitDepth.toShort())               // BitsPerSample
+    writeInt(header, 16, 16)
+    writeShort(header, 20, 1)
+    writeShort(header, 22, channels.toShort())
+    writeInt(header, 24, sampleRate)
+    writeInt(header, 28, byteRate)
+    writeShort(header, 32, (channels * bitDepth / 8).toShort())
+    writeShort(header, 34, bitDepth.toShort())
 
     // "data" subchunk
     header[36] = 'd'.code.toByte()
