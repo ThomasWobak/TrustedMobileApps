@@ -1,9 +1,10 @@
 // RecordAudioScreenWithImport.kt
 package com.example.mobileappstrusted.screens
 
+
 import android.Manifest
-import android.content.Context
 import android.content.ContentResolver
+import android.content.Context
 import android.net.Uri
 import android.media.AudioFormat
 import android.media.AudioRecord
@@ -20,7 +21,6 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 
-
 @Composable
 fun RecordAudioScreen(onRecordingComplete: (String) -> Unit) {
     val context = LocalContext.current
@@ -28,6 +28,9 @@ fun RecordAudioScreen(onRecordingComplete: (String) -> Unit) {
     var isRecording by remember { mutableStateOf(false) }
     var statusText by remember { mutableStateOf("Press to start recording or import an audio file") }
     var recordingThread: Thread? by remember { mutableStateOf(null) }
+
+    // Holds the path once recording/import finishes
+    var finishedFilePath by remember { mutableStateOf<String?>(null) }
 
     // Request RECORD_AUDIO permission
     val requestPermissionLauncher = rememberLauncherForActivityResult(
@@ -52,7 +55,7 @@ fun RecordAudioScreen(onRecordingComplete: (String) -> Unit) {
             )
             if (importedFile != null) {
                 statusText = "Imported: ${importedFile.name}"
-                onRecordingComplete(importedFile.absolutePath)
+                finishedFilePath = importedFile.absolutePath
             } else {
                 statusText = "Failed to import file."
             }
@@ -96,7 +99,7 @@ fun RecordAudioScreen(onRecordingComplete: (String) -> Unit) {
 
             val wavBytes = audioData.toByteArray()
             writeWavFile(wavBytes, outputFile, sampleRate, 1, 16)
-            onRecordingComplete(outputFile.absolutePath)
+            finishedFilePath = outputFile.absolutePath
         }
         thread.start()
         recordingThread = thread
@@ -120,29 +123,53 @@ fun RecordAudioScreen(onRecordingComplete: (String) -> Unit) {
                 modifier = Modifier.padding(bottom = 16.dp)
             )
 
-            Button(
-                onClick = {
-                    if (!isRecording) startRecording() else stopRecording()
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(if (isRecording) "Stop Recording" else "Start Recording")
-            }
+            if (finishedFilePath != null) {
+                Text(
+                    text = "Recording done",
+                    style = MaterialTheme.typography.headlineSmall,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    Button(onClick = {
+                        // Discard: reset everything
+                        finishedFilePath = null
+                        statusText = "Press to start recording or import an audio file"
+                    }) {
+                        Text("Discard")
+                    }
+                    Button(onClick = {
+                        onRecordingComplete(finishedFilePath!!)
+                    }) {
+                        Text("Go to Edit")
+                    }
+                }
+            } else {
+                Button(
+                    onClick = {
+                        if (!isRecording) startRecording() else stopRecording()
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(if (isRecording) "Stop Recording" else "Start Recording")
+                }
 
-            Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
-            Button(
-                onClick = {
-                    importAudioLauncher.launch(arrayOf("audio/*"))
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Import Audio from Filesystem")
+                Button(
+                    onClick = {
+                        importAudioLauncher.launch(arrayOf("audio/*"))
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Import Audio from Filesystem")
+                }
             }
         }
     }
 }
-
 /**
  * Copies a content URI to the app's cache directory, using [prefix] + timestamp + [suffix].
  * Returns the File, or null if failure.
@@ -196,7 +223,7 @@ fun getFileExtensionFromUri(resolver: ContentResolver, uri: Uri): String? {
     return null
 }
 
-/** WAV-writing helper (exactly as before) */
+/** WAV-writing helper (created by ChatGPT) */
 fun writeWavFile(
     pcmData: ByteArray,
     outputFile: File,
