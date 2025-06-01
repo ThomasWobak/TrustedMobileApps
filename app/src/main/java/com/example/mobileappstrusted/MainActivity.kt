@@ -12,9 +12,7 @@
 //TODO: Implement validate Recording
 //TODO: Implement going back using strg+z using hash tree
 //TODO: improve audio recording
-// MainActivity.kt
-// MainActivity.kt
-// MainActivity.kt
+
 package com.example.mobileappstrusted
 
 import android.os.Bundle
@@ -24,7 +22,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
-import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavType
 import androidx.navigation.compose.*
@@ -52,12 +49,12 @@ class MainActivity : ComponentActivity() {
                         startDestination = NavScreen.Home.route,
                         modifier = Modifier.padding(innerPadding)
                     ) {
-                        // 1) Home
+                        //Home
                         composable(NavScreen.Home.route) {
                             HomeScreen(navController)
                         }
 
-                        // 2) Record
+                        //Record
                         composable(NavScreen.Record.route) {
                             RecordAudioScreen { recordedFilePath ->
                                 // Always navigate on the main thread to avoid IllegalStateException
@@ -67,12 +64,12 @@ class MainActivity : ComponentActivity() {
                             }
                         }
 
-                        // 3a) Edit with no args → placeholder
+                        // Edit with no args → placeholder
                         composable(NavScreen.Edit.route) {
                             EditAudioScreen(filePath = "")
                         }
 
-                        // 3b) Edit with a real path: "edit/{filePath}"
+                        //Edit with a real path: "edit/{filePath}"
                         composable(
                             route = NavScreen.Edit.routeWithArgs,
                             arguments = listOf(navArgument("filePath") {
