@@ -3,8 +3,9 @@
 //TODO: Be able to read .wav files DONE
 //TODO: Implement looking at audio DONE
 //TODO: Implement playback of audio DONE
-//TODO: Implement cutting of audio
-//TODO: Implement removing of audio
+//TODO: Implement cutting of own audio recording DONE
+//TODO: Implement cutting of imported audio
+//TODO: Implement moving of audio
 //TODO: Implement menu in editing screen
 //TODO: Implement exporting of project
 //TODO: Implement adding hash value when cutting/removing

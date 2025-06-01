@@ -3,20 +3,28 @@ package com.example.mobileappstrusted.screens
 
 import android.media.MediaPlayer
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.example.mobileappstrusted.components.WaveformView
 import com.example.mobileappstrusted.components.NoPathGivenScreen
 import java.io.File
 import java.io.RandomAccessFile
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import kotlin.math.abs
 
 @Composable
 fun EditAudioScreen(filePath: String) {
-    // If no path was provided, show placeholder
     if (filePath.isBlank()) {
         NoPathGivenScreen()
         return
@@ -26,10 +34,18 @@ fun EditAudioScreen(filePath: String) {
     var amplitudes by remember { mutableStateOf<List<Int>>(emptyList()) }
     val mediaPlayer = remember { MediaPlayer() }
     var isPlaying by remember { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
 
+    // Cut controls
     var removeStartText by remember { mutableStateOf("") }
     var removeEndText by remember { mutableStateOf("") }
     var removeError by remember { mutableStateOf<String?>(null) }
+
+    // Move controls
+    var moveStartText by remember { mutableStateOf("") }
+    var moveEndText by remember { mutableStateOf("") }
+    var moveDestText by remember { mutableStateOf("") }
+    var moveError by remember { mutableStateOf<String?>(null) }
 
     val isWav = currentFilePath.lowercase().endsWith(".wav")
 
@@ -50,14 +66,13 @@ fun EditAudioScreen(filePath: String) {
     }
 
     DisposableEffect(mediaPlayer) {
-        onDispose {
-            mediaPlayer.release()
-        }
+        onDispose { mediaPlayer.release() }
     }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(16.dp)
     ) {
         Text(
@@ -73,8 +88,7 @@ fun EditAudioScreen(filePath: String) {
         )
 
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center
+            modifier = Modifier.fillMaxWidth()
         ) {
             Button(onClick = {
                 if (!isPlaying) {
@@ -92,29 +106,57 @@ fun EditAudioScreen(filePath: String) {
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // If not WAV, show message and skip cut controls
+        if (amplitudes.isNotEmpty()) {
+            WaveformView(amplitudes)
+        } else {
+            if (isWav) {
+                Text("Loading waveform...", style = MaterialTheme.typography.bodyMedium)
+            } else {
+                Text(
+                    "Cannot display waveform for non-WAV file.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
         if (!isWav) {
             Text(
-                text = "Cutting is only supported for WAV files.",
+                text = "Editing features only support WAV files.",
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.error,
                 modifier = Modifier.padding(vertical = 8.dp)
             )
         } else {
-            // Cut segment controls
+            // Cut controls
             Column(modifier = Modifier.fillMaxWidth()) {
                 OutlinedTextField(
                     value = removeStartText,
                     onValueChange = { removeStartText = it },
                     label = { Text("Remove Start (sec)") },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Number,
+                        imeAction = ImeAction.Done
+                    ),
+                    keyboardActions = KeyboardActions(
+                        onDone = { focusManager.clearFocus() }
+                    )
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 OutlinedTextField(
                     value = removeEndText,
                     onValueChange = { removeEndText = it },
                     label = { Text("Remove End (sec)") },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Number,
+                        imeAction = ImeAction.Done
+                    ),
+                    keyboardActions = KeyboardActions(
+                        onDone = { focusManager.clearFocus() }
+                    )
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Button(
@@ -123,7 +165,7 @@ fun EditAudioScreen(filePath: String) {
                         val startSec = removeStartText.toFloatOrNull()
                         val endSec = removeEndText.toFloatOrNull()
                         if (startSec == null || endSec == null || startSec < 0f || endSec <= startSec) {
-                            removeError = "Invalid start/end values"
+                            removeError = "Invalid start/end"
                         } else {
                             val cutFile = cutWavFile(currentFilePath, startSec, endSec)
                             if (cutFile != null) {
@@ -149,18 +191,85 @@ fun EditAudioScreen(filePath: String) {
             }
 
             Spacer(modifier = Modifier.height(24.dp))
-        }
 
-        if (amplitudes.isNotEmpty()) {
-            WaveformView(amplitudes)
-        } else {
-            if (isWav) {
-                Text("Loading waveform...", style = MaterialTheme.typography.bodyMedium)
-            } else {
-                Text(
-                    "Cannot display waveform for non-WAV file.",
-                    style = MaterialTheme.typography.bodyMedium
+            // Move controls
+            Column(modifier = Modifier.fillMaxWidth()) {
+                OutlinedTextField(
+                    value = moveStartText,
+                    onValueChange = { moveStartText = it },
+                    label = { Text("Move Start (sec)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Number,
+                        imeAction = ImeAction.Next
+                    ),
+                    keyboardActions = KeyboardActions(
+                        onNext = { focusManager.clearFocus() }
+                    )
                 )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = moveEndText,
+                    onValueChange = { moveEndText = it },
+                    label = { Text("Move End (sec)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Number,
+                        imeAction = ImeAction.Next
+                    ),
+                    keyboardActions = KeyboardActions(
+                        onNext = { focusManager.clearFocus() }
+                    )
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = moveDestText,
+                    onValueChange = { moveDestText = it },
+                    label = { Text("Insert After (sec)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Number,
+                        imeAction = ImeAction.Done
+                    ),
+                    keyboardActions = KeyboardActions(
+                        onDone = { focusManager.clearFocus() }
+                    )
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(
+                    onClick = {
+                        moveError = null
+                        val startSec = moveStartText.toFloatOrNull()
+                        val endSec = moveEndText.toFloatOrNull()
+                        val destSec = moveDestText.toFloatOrNull()
+                        if (startSec == null || endSec == null || destSec == null ||
+                            startSec < 0f || endSec <= startSec || destSec < 0f
+                        ) {
+                            moveError = "Invalid values"
+                        } else {
+                            val movedFile =
+                                moveWavSegment(currentFilePath, startSec, endSec, destSec)
+                            if (movedFile != null) {
+                                currentFilePath = movedFile.absolutePath
+                                moveStartText = ""
+                                moveEndText = ""
+                                moveDestText = ""
+                            } else {
+                                moveError = "Move failed"
+                            }
+                        }
+                    },
+                    modifier = Modifier.align(Alignment.End)
+                ) {
+                    Text("Move Segment")
+                }
+                moveError?.let {
+                    Text(
+                        text = it,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
             }
         }
     }
@@ -168,21 +277,18 @@ fun EditAudioScreen(filePath: String) {
 
 // ----- Helper: cutting WAV files -----
 fun cutWavFile(inputPath: String, startSec: Float, endSec: Float): File? {
-    try {
+    return try {
         val inputFile = File(inputPath)
         val raf = RandomAccessFile(inputFile, "r")
 
-        // Read header (44 bytes)
         val header = ByteArray(44)
         raf.readFully(header)
-
-        // Extract sampleRate, channels, bitDepth from header
-        val sampleRate = ((header[27].toInt() and 0xFF) shl 24) or
-                ((header[26].toInt() and 0xFF) shl 16) or
-                ((header[25].toInt() and 0xFF) shl 8) or
-                (header[24].toInt() and 0xFF)
-        val channels = ((header[23].toInt() and 0xFF) shl 8) or (header[22].toInt() and 0xFF)
-        val bitDepth = ((header[35].toInt() and 0xFF) shl 8) or (header[34].toInt() and 0xFF)
+        val sampleRate =
+            ByteBuffer.wrap(header, 24, 4).order(ByteOrder.LITTLE_ENDIAN).int
+        val channels =
+            ByteBuffer.wrap(header, 22, 2).order(ByteOrder.LITTLE_ENDIAN).short.toInt()
+        val bitDepth =
+            ByteBuffer.wrap(header, 34, 2).order(ByteOrder.LITTLE_ENDIAN).short.toInt()
 
         if (channels != 1 || sampleRate != 44100 || bitDepth != 16) {
             raf.close()
@@ -193,36 +299,27 @@ fun cutWavFile(inputPath: String, startSec: Float, endSec: Float): File? {
         val dataSize = inputFile.length().toInt() - 44
         val totalSamples = dataSize / bytesPerSample
 
-        val startByte = (startSec * sampleRate * bytesPerSample).toInt()
-        val endByte = (endSec * sampleRate * bytesPerSample).toInt()
-        val startSample = startByte / bytesPerSample
-        val endSample = endByte / bytesPerSample
-
-        if (startSample < 0 || endSample > totalSamples) {
-            raf.close()
-            return null
-        }
-
-        // New data size = (samples before start) + (samples after end)
+        val startSample =
+            (startSec * sampleRate).toInt().coerceIn(0, totalSamples)
+        val endSample =
+            (endSec * sampleRate).toInt().coerceIn(startSample, totalSamples)
         val samplesBefore = startSample
         val samplesAfter = totalSamples - endSample
         val newDataSize = (samplesBefore + samplesAfter) * bytesPerSample
         val newTotalDataLen = newDataSize + 36
 
-        // Prepare output file
-        val outputFile = File(inputFile.parentFile, "cut_${System.currentTimeMillis()}.wav")
+        val outputFile =
+            File(inputFile.parentFile, "cut_${System.currentTimeMillis()}.wav")
         val outRaf = RandomAccessFile(outputFile, "rw")
 
-        // Create new header
         val newHeader = header.copyOf()
-        writeIntToByteArray(newHeader, 4, newTotalDataLen)
-        writeIntToByteArray(newHeader, 40, newDataSize)
+        writeIntLE(newHeader, 4, newTotalDataLen)
+        writeIntLE(newHeader, 40, newDataSize)
         outRaf.write(newHeader)
 
-        // Copy first segment (0 to startSample)
         val buffer = ByteArray(4096)
-        var bytesToCopy = samplesBefore * bytesPerSample
         raf.seek(44)
+        var bytesToCopy = samplesBefore * bytesPerSample
         while (bytesToCopy > 0) {
             val toRead = minOf(buffer.size, bytesToCopy)
             val read = raf.read(buffer, 0, toRead)
@@ -231,10 +328,7 @@ fun cutWavFile(inputPath: String, startSec: Float, endSec: Float): File? {
             bytesToCopy -= read
         }
 
-        // Skip the removed segment
         raf.seek((44 + endSample * bytesPerSample).toLong())
-
-        // Copy remainder (endSample to totalSamples)
         bytesToCopy = samplesAfter * bytesPerSample
         while (bytesToCopy > 0) {
             val toRead = minOf(buffer.size, bytesToCopy)
@@ -246,14 +340,136 @@ fun cutWavFile(inputPath: String, startSec: Float, endSec: Float): File? {
 
         raf.close()
         outRaf.close()
-        return outputFile
+        outputFile
     } catch (e: Exception) {
         e.printStackTrace()
-        return null
+        null
     }
 }
 
-private fun writeIntToByteArray(b: ByteArray, offset: Int, value: Int) {
+// ----- Helper: moving WAV segment -----
+private data class WavInfo(
+    val sampleRate: Int,
+    val channels: Int,
+    val bitDepth: Int,
+    val dataOffset: Long,
+    val dataSize: Int
+)
+
+private fun parseWavHeader(raf: RandomAccessFile): WavInfo? {
+    raf.seek(0)
+    val riffHeader = ByteArray(12)
+    raf.readFully(riffHeader)
+    if (!(riffHeader[0] == 'R'.code.toByte() && riffHeader[1] == 'I'.code.toByte() &&
+                riffHeader[2] == 'F'.code.toByte() && riffHeader[3] == 'F'.code.toByte() &&
+                riffHeader[8] == 'W'.code.toByte() && riffHeader[9] == 'A'.code.toByte() &&
+                riffHeader[10] == 'V'.code.toByte() && riffHeader[11] == 'E'.code.toByte())
+    ) return null
+
+    var sampleRate = 0
+    var channels = 0
+    var bitDepth = 0
+    var dataOffset: Long = -1
+    var dataSize = 0
+
+    while (true) {
+        val chunkHeader = ByteArray(8)
+        if (raf.read(chunkHeader) < 8) break
+        val chunkId = String(chunkHeader, 0, 4)
+        val chunkSize = ByteBuffer.wrap(chunkHeader, 4, 4)
+            .order(ByteOrder.LITTLE_ENDIAN).int
+        when (chunkId) {
+            "fmt " -> {
+                val fmtBytes = ByteArray(chunkSize)
+                raf.readFully(fmtBytes)
+                val fmtBuffer = ByteBuffer.wrap(fmtBytes).order(ByteOrder.LITTLE_ENDIAN)
+                val audioFormat = fmtBuffer.short.toInt() and 0xFFFF
+                if (audioFormat != 1) return null
+                channels = fmtBuffer.short.toInt() and 0xFFFF
+                sampleRate = fmtBuffer.int
+                fmtBuffer.int // byteRate
+                fmtBuffer.short // blockAlign
+                bitDepth = fmtBuffer.short.toInt() and 0xFFFF
+            }
+            "data" -> {
+                dataOffset = raf.filePointer
+                dataSize = chunkSize
+                break
+            }
+            else -> {
+                raf.seek(raf.filePointer + chunkSize)
+            }
+        }
+    }
+    return if (dataOffset >= 0) WavInfo(sampleRate, channels, bitDepth, dataOffset, dataSize) else null
+}
+
+fun moveWavSegment(inputPath: String, startSec: Float, endSec: Float, destSec: Float): File? {
+    return try {
+        val inputFile = File(inputPath)
+        val raf = RandomAccessFile(inputFile, "r")
+        val info = parseWavHeader(raf) ?: run { raf.close(); return null }
+        if (info.channels != 1 || info.sampleRate != 44100 || info.bitDepth != 16) {
+            raf.close()
+            return null
+        }
+
+        val bytesPerSample = info.bitDepth / 8
+        val totalSamples = info.dataSize / bytesPerSample
+        val startSample = (startSec * info.sampleRate).toInt().coerceIn(0, totalSamples)
+        val endSample = (endSec * info.sampleRate).toInt().coerceIn(startSample, totalSamples)
+        val destSample = (destSec * info.sampleRate).toInt().coerceIn(0, totalSamples - (endSample - startSample))
+
+        raf.seek(info.dataOffset)
+        val allData = ByteArray(info.dataSize)
+        raf.readFully(allData)
+
+        fun getBytes(s: Int, e: Int): ByteArray {
+            val bstart = s * bytesPerSample
+            val bend = e * bytesPerSample
+            return allData.copyOfRange(bstart, bend)
+        }
+
+        val bytesA = getBytes(0, startSample)
+        val bytesB = getBytes(startSample, endSample)
+        val bytesC = getBytes(endSample, totalSamples)
+
+        val newData: ByteArray = if (destSample <= startSample) {
+            val part1 = getBytes(0, destSample)
+            val part2 = getBytes(destSample, startSample)
+            part1 + bytesB + part2 + bytesC
+        } else {
+            val part1 = bytesA
+            val part2 = getBytes(endSample, destSample)
+            val part3 = getBytes(destSample, totalSamples)
+            part1 + part2 + bytesB + part3
+        }
+
+        val newDataSize = newData.size
+        val newTotalDataLen = newDataSize + 36
+
+        val outputFile = File(inputFile.parentFile, "moved_${System.currentTimeMillis()}.wav")
+        val outRaf = RandomAccessFile(outputFile, "rw")
+
+        raf.seek(0)
+        val headerBytes = ByteArray(info.dataOffset.toInt())
+        raf.readFully(headerBytes)
+        writeIntLE(headerBytes, 4, newTotalDataLen)
+        writeIntLE(headerBytes, (info.dataOffset + 4).toInt(), newDataSize)
+        outRaf.write(headerBytes)
+        outRaf.write(newData)
+
+        raf.close()
+        outRaf.close()
+        outputFile
+    } catch (e: Exception) {
+        e.printStackTrace()
+        null
+    }
+}
+
+// ----- Utility -----
+private fun writeIntLE(b: ByteArray, offset: Int, value: Int) {
     b[offset] = (value and 0xFF).toByte()
     b[offset + 1] = ((value shr 8) and 0xFF).toByte()
     b[offset + 2] = ((value shr 16) and 0xFF).toByte()
