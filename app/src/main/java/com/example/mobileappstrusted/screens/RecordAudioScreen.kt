@@ -29,7 +29,6 @@ fun RecordAudioScreen(onRecordingComplete: (String) -> Unit) {
     var statusText by remember { mutableStateOf("Press to start recording or import an audio file") }
     var recordingThread: Thread? by remember { mutableStateOf(null) }
 
-    // Holds the path once recording/import finishes
     var finishedFilePath by remember { mutableStateOf<String?>(null) }
 
     // Request RECORD_AUDIO permission
