@@ -2,6 +2,7 @@
 package com.example.mobileappstrusted.screens
 
 import android.media.MediaPlayer
+import android.util.Log
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
@@ -15,6 +16,8 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.example.mobileappstrusted.audio.MerkleHasher
+import com.example.mobileappstrusted.audio.ORIGINAL_MERKLE_ROOT_HASH_CHUNK_IDENTIFIER
 import com.example.mobileappstrusted.components.WaveformView
 import com.example.mobileappstrusted.components.NoPathGivenScreen
 import java.io.File
@@ -36,6 +39,8 @@ fun EditAudioScreen(filePath: String) {
     var isPlaying by remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
 
+    var isOriginal by remember { mutableStateOf<Boolean?>(null) }
+
     // Cut controls
     var removeStartText by remember { mutableStateOf("") }
     var removeEndText by remember { mutableStateOf("") }
@@ -56,6 +61,10 @@ fun EditAudioScreen(filePath: String) {
         } else {
             emptyList()
         }
+        isOriginal = if (file.exists() && isWav) {
+            MerkleHasher.verifyWavMerkleRoot(file)
+        } else null
+
         mediaPlayer.reset()
         try {
             mediaPlayer.setDataSource(currentFilePath)
@@ -75,6 +84,12 @@ fun EditAudioScreen(filePath: String) {
             .verticalScroll(rememberScrollState())
             .padding(16.dp)
     ) {
+        when (isOriginal) {
+            true -> Text("✔️ Original", color = MaterialTheme.colorScheme.primary)
+            false -> Text("❌ Not original", color = MaterialTheme.colorScheme.error)
+            null -> {} // Do nothing while loading
+        }
+
         Text(
             text = "Edit Audio",
             style = MaterialTheme.typography.headlineMedium,
@@ -490,3 +505,4 @@ fun extractAmplitudesFromWav(file: File, sampleEvery: Int = 200): List<Int> {
     }
     return amplitudes
 }
+

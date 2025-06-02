@@ -9,6 +9,7 @@ import android.net.Uri
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
@@ -17,9 +18,14 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.example.mobileappstrusted.audio.AudioChunker
+import com.example.mobileappstrusted.audio.MerkleHasher
+import com.example.mobileappstrusted.audio.ORIGINAL_MERKLE_ROOT_HASH_CHUNK_IDENTIFIER
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
 @Composable
 fun RecordAudioScreen(onRecordingComplete: (String) -> Unit) {
@@ -231,7 +237,15 @@ fun writeWavFile(
     bitDepth: Int
 ) {
     val byteRate = sampleRate * channels * bitDepth / 8
-    val totalDataLen = pcmData.size + 36
+    val audioDataSize = pcmData.size
+
+    val merkleRoot = MerkleHasher.buildMerkleRoot(
+        AudioChunker.chunkAudioData(pcmData, 2048)
+    )
+    val merkleChunkSize = merkleRoot.size
+    val customChunkSize = 8 + merkleChunkSize // 4 bytes ID + 4 bytes size + hash bytes
+
+    val totalDataLen = 36 + audioDataSize + 8 + customChunkSize // file size minus first 8 bytes
     val header = ByteArray(44)
 
     // RIFF header
@@ -239,13 +253,13 @@ fun writeWavFile(
     header[1] = 'I'.code.toByte()
     header[2] = 'F'.code.toByte()
     header[3] = 'F'.code.toByte()
-    writeInt(header, 4, totalDataLen)
+    writeInt(header, 4, totalDataLen) // total length minus first 8 bytes
     header[8] = 'W'.code.toByte()
     header[9] = 'A'.code.toByte()
     header[10] = 'V'.code.toByte()
     header[11] = 'E'.code.toByte()
 
-    // "fmt " subchunk
+    // fmt chunk
     header[12] = 'f'.code.toByte()
     header[13] = 'm'.code.toByte()
     header[14] = 't'.code.toByte()
@@ -258,16 +272,25 @@ fun writeWavFile(
     writeShort(header, 32, (channels * bitDepth / 8).toShort())
     writeShort(header, 34, bitDepth.toShort())
 
-    // "data" subchunk
+    // data chunk
     header[36] = 'd'.code.toByte()
     header[37] = 'a'.code.toByte()
     header[38] = 't'.code.toByte()
     header[39] = 'a'.code.toByte()
-    writeInt(header, 40, pcmData.size)
+    writeInt(header, 40, audioDataSize)
 
-    outputFile.outputStream().use {
-        it.write(header)
-        it.write(pcmData)
+    outputFile.outputStream().use { out ->
+        out.write(header)
+        out.write(pcmData)
+
+        // Write "omrh" chunk
+        val chunkId = ORIGINAL_MERKLE_ROOT_HASH_CHUNK_IDENTIFIER.toByteArray(Charsets.US_ASCII)
+        val chunkSizeBytes = ByteBuffer.allocate(4)
+            .order(ByteOrder.LITTLE_ENDIAN).putInt(merkleChunkSize).array()
+
+        out.write(chunkId)
+        out.write(chunkSizeBytes)
+        out.write(merkleRoot)
     }
 }
 
