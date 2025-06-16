@@ -194,6 +194,20 @@ fun EditAudioScreen(filePath: String) {
             }, Modifier.align(Alignment.End)) {
                 Text("Apply Reorder")
             }
+            Spacer(Modifier.height(8.dp))
+
+            Button(
+                onClick = {
+
+                    // reset every block to its original position
+                    blocks = blocks
+                        .map { it.apply { currentIndex = originalIndex } }
+                        .sortedBy { it.currentIndex }
+                },
+                modifier = Modifier.align(Alignment.End)
+            ) {
+                Text("Reset to Original Order")
+            }
             reorderError?.let { Text(it, color=MaterialTheme.colorScheme.error) }
         }
     }
