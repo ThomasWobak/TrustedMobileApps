@@ -16,7 +16,6 @@ object MerkleHasher {
         return messageDigest.digest(chunk)
     }
 
-    @OptIn(ExperimentalStdlibApi::class)
     fun buildMerkleRoot(blocks: List<WavBlock>): ByteArray {
 
         var currentLevel = blocks.map { hashChunk(it.data) }
@@ -41,9 +40,6 @@ object MerkleHasher {
                 .order(ByteOrder.LITTLE_ENDIAN).int
 
             if (chunkId == ORIGINAL_MERKLE_ROOT_HASH_CHUNK_IDENTIFIER) {
-                if (chunkId == ORIGINAL_MERKLE_ROOT_HASH_CHUNK_IDENTIFIER) {
-                    Log.d("AudioDebug", "Found omrh chunk with size $chunkSize")
-                }
 
                 return bytes.sliceArray(offset + 8 until offset + 8 + chunkSize)
             }
@@ -54,7 +50,7 @@ object MerkleHasher {
         return null
     }
 
-    @OptIn(ExperimentalStdlibApi::class)
+
     fun verifyWavMerkleRoot(file: File): Boolean {
         if (!file.exists() || file.length() <= 44) return false
 
