@@ -5,27 +5,37 @@ package com.example.mobileappstrusted.screens
 import android.Manifest
 import android.content.ContentResolver
 import android.content.Context
-import android.net.Uri
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
-import android.util.Log
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import com.example.mobileappstrusted.audio.AudioChunker
-import com.example.mobileappstrusted.audio.MerkleHasher
-import com.example.mobileappstrusted.audio.ORIGINAL_MERKLE_ROOT_HASH_CHUNK_IDENTIFIER
+import com.example.mobileappstrusted.audio.WavUtils.writeWavFile
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 
 @Composable
 fun RecordAudioScreen(onRecordingComplete: (String) -> Unit) {
@@ -228,80 +238,3 @@ fun getFileExtensionFromUri(resolver: ContentResolver, uri: Uri): String? {
     return null
 }
 
-/** WAV-writing helper (created by ChatGPT) */
-fun writeWavFile(
-    pcmData: ByteArray,
-    outputFile: File,
-    sampleRate: Int,
-    channels: Int,
-    bitDepth: Int
-) {
-    val byteRate = sampleRate * channels * bitDepth / 8
-    val audioDataSize = pcmData.size
-
-    val merkleRoot = MerkleHasher.buildMerkleRoot(
-        AudioChunker.chunkAudioData(pcmData, 2048)
-    )
-    val merkleChunkSize = merkleRoot.size
-    val customChunkSize = 8 + merkleChunkSize // 4 bytes ID + 4 bytes size + hash bytes
-
-    val totalDataLen = 36 + audioDataSize + 8 + customChunkSize // file size minus first 8 bytes
-    val header = ByteArray(44)
-
-    // RIFF header
-    header[0] = 'R'.code.toByte()
-    header[1] = 'I'.code.toByte()
-    header[2] = 'F'.code.toByte()
-    header[3] = 'F'.code.toByte()
-    writeInt(header, 4, totalDataLen) // total length minus first 8 bytes
-    header[8] = 'W'.code.toByte()
-    header[9] = 'A'.code.toByte()
-    header[10] = 'V'.code.toByte()
-    header[11] = 'E'.code.toByte()
-
-    // fmt chunk
-    header[12] = 'f'.code.toByte()
-    header[13] = 'm'.code.toByte()
-    header[14] = 't'.code.toByte()
-    header[15] = ' '.code.toByte()
-    writeInt(header, 16, 16)
-    writeShort(header, 20, 1)
-    writeShort(header, 22, channels.toShort())
-    writeInt(header, 24, sampleRate)
-    writeInt(header, 28, byteRate)
-    writeShort(header, 32, (channels * bitDepth / 8).toShort())
-    writeShort(header, 34, bitDepth.toShort())
-
-    // data chunk
-    header[36] = 'd'.code.toByte()
-    header[37] = 'a'.code.toByte()
-    header[38] = 't'.code.toByte()
-    header[39] = 'a'.code.toByte()
-    writeInt(header, 40, audioDataSize)
-
-    outputFile.outputStream().use { out ->
-        out.write(header)
-        out.write(pcmData)
-
-        // Write "omrh" chunk
-        val chunkId = ORIGINAL_MERKLE_ROOT_HASH_CHUNK_IDENTIFIER.toByteArray(Charsets.US_ASCII)
-        val chunkSizeBytes = ByteBuffer.allocate(4)
-            .order(ByteOrder.LITTLE_ENDIAN).putInt(merkleChunkSize).array()
-
-        out.write(chunkId)
-        out.write(chunkSizeBytes)
-        out.write(merkleRoot)
-    }
-}
-
-fun writeInt(b: ByteArray, offset: Int, value: Int) {
-    b[offset] = (value and 0xff).toByte()
-    b[offset + 1] = ((value shr 8) and 0xff).toByte()
-    b[offset + 2] = ((value shr 16) and 0xff).toByte()
-    b[offset + 3] = ((value shr 24) and 0xff).toByte()
-}
-
-fun writeShort(b: ByteArray, offset: Int, value: Short) {
-    b[offset] = (value.toInt() and 0xff).toByte()
-    b[offset + 1] = ((value.toInt() shr 8) and 0xff).toByte()
-}

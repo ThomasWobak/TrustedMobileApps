@@ -1,31 +1,43 @@
 // EditAudioScreen.kt
 package com.example.mobileappstrusted.screens
 
-import android.content.Context
 import android.media.MediaPlayer
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Button
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.example.mobileappstrusted.audio.MerkleHasher
-import com.example.mobileappstrusted.components.WaveformView
+import com.example.mobileappstrusted.audio.WavCutter.cutWavFile
+import com.example.mobileappstrusted.audio.WavUtils.extractAmplitudesFromWav
+import com.example.mobileappstrusted.audio.WavUtils.splitWavIntoBlocks
+import com.example.mobileappstrusted.audio.WavUtils.writeBlocksToTempFile
 import com.example.mobileappstrusted.components.NoPathGivenScreen
+import com.example.mobileappstrusted.components.WaveformView
 import com.example.mobileappstrusted.dataclass.WavBlock
 import java.io.File
-import java.io.RandomAccessFile
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
-import kotlin.math.abs
 import kotlin.math.min
-
-private const val BLOCK_SIZE = 100 * 1024  // 100 KB per block, roughly 1.16 seconds
 
 @Composable
 fun EditAudioScreen(filePath: String) {
@@ -66,7 +78,7 @@ fun EditAudioScreen(filePath: String) {
         amplitudes = if (f.exists() && isWav) extractAmplitudesFromWav(f) else emptyList()
 
         if (isWav) {
-            val (hdr, blks) = splitWavIntoBlocks(f, BLOCK_SIZE)
+            val (hdr, blks) = splitWavIntoBlocks(f)
             wavHeader = hdr
             blocks = blks
             playbackFile = writeBlocksToTempFile(context, hdr, blks)
@@ -107,9 +119,9 @@ fun EditAudioScreen(filePath: String) {
     ) {
 
         when (isOriginal) {
-            true -> Text("✔️ Original", color = MaterialTheme.colorScheme.primary)
-            false -> Text("❌ Not original", color = MaterialTheme.colorScheme.error)
-            null -> {} // Do nothing while loading
+            true -> Text("✔️ Verified", color = MaterialTheme.colorScheme.primary)
+            false -> Text("❌ Not Verified", color = MaterialTheme.colorScheme.error)
+            null -> {}
         }
 
         // play controls
@@ -228,150 +240,3 @@ fun EditAudioScreen(filePath: String) {
         }
     }
 }
-// ----- Helper: cutting WAV files -----
-fun cutWavFile(inputPath: String, startSec: Float, endSec: Float): File? {
-    return try {
-        val inputFile = File(inputPath)
-        val raf = RandomAccessFile(inputFile, "r")
-
-        val header = ByteArray(44)
-        raf.readFully(header)
-        val sampleRate =
-            ByteBuffer.wrap(header, 24, 4).order(ByteOrder.LITTLE_ENDIAN).int
-        val channels =
-            ByteBuffer.wrap(header, 22, 2).order(ByteOrder.LITTLE_ENDIAN).short.toInt()
-        val bitDepth =
-            ByteBuffer.wrap(header, 34, 2).order(ByteOrder.LITTLE_ENDIAN).short.toInt()
-
-        if (channels != 1 || sampleRate != 44100 || bitDepth != 16) {
-            raf.close()
-            return null
-        }
-
-        val bytesPerSample = bitDepth / 8
-        val dataSize = inputFile.length().toInt() - 44
-        val totalSamples = dataSize / bytesPerSample
-
-        val startSample =
-            (startSec * sampleRate).toInt().coerceIn(0, totalSamples)
-        val endSample =
-            (endSec * sampleRate).toInt().coerceIn(startSample, totalSamples)
-        val samplesBefore = startSample
-        val samplesAfter = totalSamples - endSample
-        val newDataSize = (samplesBefore + samplesAfter) * bytesPerSample
-        val newTotalDataLen = newDataSize + 36
-
-        val outputFile =
-            File(inputFile.parentFile, "cut_${System.currentTimeMillis()}.wav")
-        val outRaf = RandomAccessFile(outputFile, "rw")
-
-        val newHeader = header.copyOf()
-        writeIntLE(newHeader, 4, newTotalDataLen)
-        writeIntLE(newHeader, 40, newDataSize)
-        outRaf.write(newHeader)
-
-        val buffer = ByteArray(4096)
-        raf.seek(44)
-        var bytesToCopy = samplesBefore * bytesPerSample
-        while (bytesToCopy > 0) {
-            val toRead = minOf(buffer.size, bytesToCopy)
-            val read = raf.read(buffer, 0, toRead)
-            if (read == -1) break
-            outRaf.write(buffer, 0, read)
-            bytesToCopy -= read
-        }
-
-        raf.seek((44 + endSample * bytesPerSample).toLong())
-        bytesToCopy = samplesAfter * bytesPerSample
-        while (bytesToCopy > 0) {
-            val toRead = minOf(buffer.size, bytesToCopy)
-            val read = raf.read(buffer, 0, toRead)
-            if (read == -1) break
-            outRaf.write(buffer, 0, read)
-            bytesToCopy -= read
-        }
-
-        raf.close()
-        outRaf.close()
-        outputFile
-    } catch (e: Exception) {
-        e.printStackTrace()
-        null
-    }
-}
-
-
-
-// ----- Utility -----
-
-fun extractAmplitudesFromWav(file: File, sampleEvery: Int = 200): List<Int> {
-    val bytes = file.readBytes()
-    if (bytes.size <= 44) return emptyList()
-    val amplitudes = mutableListOf<Int>()
-    var i = 44
-    while (i + 1 < bytes.size) {
-        val low = bytes[i].toInt() and 0xFF
-        val high = bytes[i + 1].toInt()
-        val sample = (high shl 8) or low
-        amplitudes.add(abs(sample))
-        i += 2 * sampleEvery
-    }
-    return amplitudes
-}
-
-/**
- * Reads the WAV header (first 44 bytes) and splits the data chunk into equal blocks.
- * Returns Pair<headerBytes, listOf blocks>.
- */
-fun splitWavIntoBlocks(file: File, blockSize: Int): Pair<ByteArray, List<WavBlock>> {
-    val all = file.readBytes()
-    require(all.size > 44)
-    val header = all.copyOfRange(0, 44)
-    val data = all.copyOfRange(44, all.size)
-    val count = (data.size + blockSize - 1) / blockSize
-    val blocks = List(count) { idx ->
-        val start = idx * blockSize
-        val end = min(start + blockSize, data.size)
-        WavBlock(originalIndex = idx, currentIndex = idx, data = data.copyOfRange(start, end))
-    }
-    return header to blocks
-}
-
-/**
- * Rewrites a temp WAV file by concatenating blocks in order of currentIndex.
- */
-fun writeBlocksToTempFile(
-    context: Context,
-    header: ByteArray,
-    blocks: List<WavBlock>
-): File {
-    // choose cache directory from the passed context
-    val tempDir = context.externalCacheDir ?: context.cacheDir
-    val outFile = File.createTempFile("reorder_", ".wav", tempDir)
-
-    // sort & merge
-    val body = blocks.sortedBy { it.currentIndex }
-        .fold(ByteArray(0)) { acc, b -> acc + b.data }
-
-    // patch header lengths
-    val newTotal = body.size + 36
-    val newHdr = header.copyOf().also {
-        writeIntLE(it, 4, newTotal)
-        writeIntLE(it, 40, body.size)
-    }
-
-    outFile.outputStream().use {
-        it.write(newHdr)
-        it.write(body)
-    }
-    return outFile
-}
-
-fun writeIntLE(b: ByteArray, offset: Int, v: Int) {
-    b[offset] = (v and 0xFF).toByte()
-    b[offset+1] = ((v shr 8) and 0xFF).toByte()
-    b[offset+2] = ((v shr 16) and 0xFF).toByte()
-    b[offset+3] = ((v shr 24) and 0xFF).toByte()
-}
-
-
