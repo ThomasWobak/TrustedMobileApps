@@ -1,34 +1,37 @@
 package com.example.mobileappstrusted.audio
 
 import android.util.Log
+import com.example.mobileappstrusted.dataclass.WavBlock
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.security.MessageDigest
 
-const val ORIGINAL_MERKLE_ROOT_HASH_CHUNK_IDENTIFIER="omrh"
+const val ORIGINAL_MERKLE_ROOT_HASH_CHUNK_IDENTIFIER = "omrh"
+
 object MerkleHasher {
+
+    private val messageDigest = MessageDigest.getInstance("SHA-256")
     private fun hashChunk(chunk: ByteArray): ByteArray {
-        return MessageDigest.getInstance("SHA-256").digest(chunk)
+        return messageDigest.digest(chunk)
     }
 
-    fun buildMerkleRoot(chunks: List<ByteArray>): ByteArray {
-        if (chunks.isEmpty()) throw IllegalArgumentException("No chunks to hash")
+    @OptIn(ExperimentalStdlibApi::class)
+    fun buildMerkleRoot(blocks: List<WavBlock>): ByteArray {
 
-        var currentLevel = chunks.map { hashChunk(it) }
+        var currentLevel = blocks.map { hashChunk(it.data) }
 
         while (currentLevel.size > 1) {
             currentLevel = currentLevel.chunked(2).map { pair ->
                 val left = pair[0]
-                val right = if (pair.size == 2) pair[1] else pair[0] // duplicate last if odd
+                val right = if (pair.size == 2) pair[1] else pair[0]
                 hashChunk(left + right)
             }
         }
-
-        return currentLevel[0]
+        return currentLevel.first()
     }
 
-    fun extractMerkleRootFromWav(file: File): ByteArray? {
+    private fun extractMerkleRootFromWav(file: File): ByteArray? {
         val bytes = file.readBytes()
         var offset = 12
 
@@ -38,62 +41,32 @@ object MerkleHasher {
                 .order(ByteOrder.LITTLE_ENDIAN).int
 
             if (chunkId == ORIGINAL_MERKLE_ROOT_HASH_CHUNK_IDENTIFIER) {
-                Log.w("AudioDebug", "Found chunk!!!")
+                if (chunkId == ORIGINAL_MERKLE_ROOT_HASH_CHUNK_IDENTIFIER) {
+                    Log.d("AudioDebug", "Found omrh chunk with size $chunkSize")
+                }
+
                 return bytes.sliceArray(offset + 8 until offset + 8 + chunkSize)
             }
 
             offset += 8 + chunkSize
         }
-        Log.w("AudioDebug", "Shit")
 
         return null
     }
 
+    @OptIn(ExperimentalStdlibApi::class)
     fun verifyWavMerkleRoot(file: File): Boolean {
-        val bytes = file.readBytes()
-        if (bytes.size <= 44) return false
+        if (!file.exists() || file.length() <= 44) return false
 
-        // Step 1: Extract the 'omrh' chunk
-        var omrhHash: ByteArray? = null
-        var offset = 12
-        var dataChunkStart = -1
-        var dataChunkSize = -1
-
-        while (offset + 8 <= bytes.size) {
-            val chunkId = String(bytes, offset, 4, Charsets.US_ASCII)
-            val chunkSize = ByteBuffer.wrap(bytes, offset + 4, 4)
-                .order(ByteOrder.LITTLE_ENDIAN).int
-
-            if (chunkId == "data") {
-                dataChunkStart = offset + 8
-                dataChunkSize = chunkSize
-            } else if (chunkId == ORIGINAL_MERKLE_ROOT_HASH_CHUNK_IDENTIFIER) {
-                val start = offset + 8
-                val end = start + chunkSize
-                if (end <= bytes.size) {
-                    omrhHash = bytes.sliceArray(start until end)
-                }
-            }
-
-            offset += 8 + chunkSize
-        }
-
+        val omrhHash = extractMerkleRootFromWav(file)
         if (omrhHash == null) {
             Log.w("AudioDebug", "No 'omrh' chunk found.")
             return false
         }
 
-        if (dataChunkStart == -1 || dataChunkSize <= 0 || dataChunkStart + dataChunkSize > bytes.size) {
-            Log.w("AudioDebug", "Invalid or missing PCM 'data' chunk.")
-            return false
-        }
+        val (_, blocks) = WavUtils.splitWavIntoBlocks(file)
 
-        // Step 2: Recompute Merkle root
-        val pcmData = bytes.sliceArray(dataChunkStart until (dataChunkStart + dataChunkSize))
-        val recomputedRoot = buildMerkleRoot(
-            AudioChunker.chunkAudioData(pcmData, 2048)
-        )
-
+        val recomputedRoot = buildMerkleRoot(blocks)
         val matches = omrhHash.contentEquals(recomputedRoot)
 
         if (matches) {
