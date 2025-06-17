@@ -1,33 +1,38 @@
 // EditAudioScreen.kt
 package com.example.mobileappstrusted.screens
 
+import android.content.Context
 import android.media.MediaPlayer
 import android.util.Log
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.example.mobileappstrusted.audio.MerkleHasher
 import com.example.mobileappstrusted.audio.ORIGINAL_MERKLE_ROOT_HASH_CHUNK_IDENTIFIER
 import com.example.mobileappstrusted.components.WaveformView
 import com.example.mobileappstrusted.components.NoPathGivenScreen
+import com.example.mobileappstrusted.dataclass.WavBlock
 import java.io.File
 import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.abs
+import kotlin.math.min
+
+
+private const val BLOCK_SIZE = 100 * 1024  // 100 KB per block, roughly 1.16 seconds
 
 @Composable
 fun EditAudioScreen(filePath: String) {
+    val context = LocalContext.current
     if (filePath.isBlank()) {
         NoPathGivenScreen()
         return
@@ -37,40 +42,59 @@ fun EditAudioScreen(filePath: String) {
     var amplitudes by remember { mutableStateOf<List<Int>>(emptyList()) }
     val mediaPlayer = remember { MediaPlayer() }
     var isPlaying by remember { mutableStateOf(false) }
-    val focusManager = LocalFocusManager.current
 
     var isOriginal by remember { mutableStateOf<Boolean?>(null) }
 
     // Cut controls
+
     var removeStartText by remember { mutableStateOf("") }
     var removeEndText by remember { mutableStateOf("") }
     var removeError by remember { mutableStateOf<String?>(null) }
 
-    // Move controls
-    var moveStartText by remember { mutableStateOf("") }
-    var moveEndText by remember { mutableStateOf("") }
-    var moveDestText by remember { mutableStateOf("") }
-    var moveError by remember { mutableStateOf<String?>(null) }
+    // reorder controls
+    var reorderFromText by remember { mutableStateOf("") }
+    var reorderToText   by remember { mutableStateOf("") }
+    var reorderError    by remember { mutableStateOf<String?>(null) }
 
     val isWav = currentFilePath.lowercase().endsWith(".wav")
 
+    // header + blocks + playback temp file
+    var wavHeader by remember { mutableStateOf<ByteArray?>(null) }
+    var blocks    by remember { mutableStateOf<List<WavBlock>>(emptyList()) }
+    var playbackFile by remember { mutableStateOf<File?>(null) }
+
+    // 1) load amplitudes + initial mediaPlayer when path changes
     LaunchedEffect(currentFilePath) {
-        val file = File(currentFilePath)
-        amplitudes = if (file.exists() && isWav) {
-            extractAmplitudesFromWav(file)
-        } else {
-            emptyList()
+        val f = File(currentFilePath)
+        amplitudes = if (f.exists() && isWav) extractAmplitudesFromWav(f) else emptyList()
+
+        if (isWav) {
+            val (hdr, blks) = splitWavIntoBlocks(f, BLOCK_SIZE)
+            wavHeader = hdr
+            blocks = blks
+            playbackFile = writeBlocksToTempFile(context, hdr, blks)
         }
+        
         isOriginal = if (file.exists() && isWav) {
             MerkleHasher.verifyWavMerkleRoot(file)
         } else null
 
+
         mediaPlayer.reset()
-        try {
-            mediaPlayer.setDataSource(currentFilePath)
+        playbackFile?.let {
+            mediaPlayer.setDataSource(it.absolutePath)
             mediaPlayer.prepare()
-        } catch (e: Exception) {
-            e.printStackTrace()
+        }
+    }
+
+    // 2) whenever blocks reorder, rewrite playback + reload player
+    LaunchedEffect(blocks) {
+        val hdr = wavHeader ?: return@LaunchedEffect
+        playbackFile = writeBlocksToTempFile(context, hdr, blocks)
+        mediaPlayer.reset()
+        playbackFile?.let {
+            mediaPlayer.setDataSource(it.absolutePath)
+            mediaPlayer.prepare()
         }
     }
 
@@ -84,212 +108,129 @@ fun EditAudioScreen(filePath: String) {
             .verticalScroll(rememberScrollState())
             .padding(16.dp)
     ) {
+
         when (isOriginal) {
             true -> Text("✔️ Original", color = MaterialTheme.colorScheme.primary)
             false -> Text("❌ Not original", color = MaterialTheme.colorScheme.error)
             null -> {} // Do nothing while loading
         }
 
-        Text(
-            text = "Edit Audio",
-            style = MaterialTheme.typography.headlineMedium,
-            modifier = Modifier.padding(bottom = 8.dp)
-        )
+        // play controls
+        Text("Edit Audio", style = MaterialTheme.typography.headlineMedium)
+        Text("Loaded: ${File(currentFilePath).name}", style = MaterialTheme.typography.bodyLarge)
+        Row(Modifier.fillMaxWidth()) {
+            Button({
 
-        Text(
-            text = "Loaded file: ${File(currentFilePath).name}",
-            style = MaterialTheme.typography.bodyLarge,
-            modifier = Modifier.padding(bottom = 16.dp)
-        )
-
-        Row(
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Button(onClick = {
                 if (!isPlaying) {
-                    mediaPlayer.start()
-                    isPlaying = true
+                    mediaPlayer.start(); isPlaying = true
                     mediaPlayer.setOnCompletionListener { isPlaying = false }
                 } else {
-                    mediaPlayer.pause()
-                    isPlaying = false
+                    mediaPlayer.pause(); isPlaying = false
                 }
-            }) {
-                Text(if (isPlaying) "Pause" else "Play")
-            }
+            }) { Text(if (isPlaying) "Pause" else "Play") }
         }
+        Spacer(Modifier.height(24.dp))
 
-        Spacer(modifier = Modifier.height(24.dp))
-
-        if (amplitudes.isNotEmpty()) {
-            WaveformView(amplitudes)
-        } else {
-            if (isWav) {
-                Text("Loading waveform...", style = MaterialTheme.typography.bodyMedium)
-            } else {
-                Text(
-                    "Cannot display waveform for non-WAV file.",
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
+        // waveform
+        if (amplitudes.isNotEmpty()) WaveformView(amplitudes)
+        else if (isWav) Text("Loading waveform…", style = MaterialTheme.typography.bodyMedium)
+        else Text("Cannot display waveform for non-WAV file.", style = MaterialTheme.typography.bodyMedium)
+        Spacer(Modifier.height(24.dp))
 
         if (!isWav) {
-            Text(
-                text = "Editing features only support WAV files.",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(vertical = 8.dp)
-            )
+            Text("Editing features only support WAV files.", color = MaterialTheme.colorScheme.error)
         } else {
-            // Cut controls
-            Column(modifier = Modifier.fillMaxWidth()) {
+            // cut controls (unchanged)
+            Column(Modifier.fillMaxWidth()) {
                 OutlinedTextField(
                     value = removeStartText,
                     onValueChange = { removeStartText = it },
                     label = { Text("Remove Start (sec)") },
-                    modifier = Modifier.fillMaxWidth(),
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Number,
-                        imeAction = ImeAction.Done
-                    ),
-                    keyboardActions = KeyboardActions(
-                        onDone = { focusManager.clearFocus() }
-                    )
+                    keyboardOptions = KeyboardOptions.Default.copy(keyboardType = KeyboardType.Number),
                 )
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = removeEndText,
                     onValueChange = { removeEndText = it },
                     label = { Text("Remove End (sec)") },
-                    modifier = Modifier.fillMaxWidth(),
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Number,
-                        imeAction = ImeAction.Done
-                    ),
-                    keyboardActions = KeyboardActions(
-                        onDone = { focusManager.clearFocus() }
-                    )
+                    keyboardOptions = KeyboardOptions.Default.copy(keyboardType = KeyboardType.Number),
                 )
-                Spacer(modifier = Modifier.height(8.dp))
-                Button(
-                    onClick = {
-                        removeError = null
-                        val startSec = removeStartText.toFloatOrNull()
-                        val endSec = removeEndText.toFloatOrNull()
-                        if (startSec == null || endSec == null || startSec < 0f || endSec <= startSec) {
-                            removeError = "Invalid start/end"
-                        } else {
-                            val cutFile = cutWavFile(currentFilePath, startSec, endSec)
-                            if (cutFile != null) {
-                                currentFilePath = cutFile.absolutePath
-                                removeStartText = ""
-                                removeEndText = ""
-                            } else {
-                                removeError = "Cut failed"
-                            }
-                        }
-                    },
-                    modifier = Modifier.align(Alignment.End)
-                ) {
+                Spacer(Modifier.height(8.dp))
+                Button(onClick = {
+                    removeError = null
+                    val s = removeStartText.toFloatOrNull()
+                    val e = removeEndText.toFloatOrNull()
+                    if (s==null||e==null||s<0f||e<=s) removeError="Invalid"
+                    else {
+                        val cf = cutWavFile(currentFilePath,s,e)
+                        if(cf!=null){ currentFilePath=cf.absolutePath; removeStartText=""; removeEndText="" }
+                        else removeError="Cut failed"
+                    }
+                }, Modifier.align(Alignment.End)) {
                     Text("Remove Segment")
                 }
-                removeError?.let {
-                    Text(
-                        text = it,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.padding(top = 4.dp)
-                    )
-                }
+                removeError?.let { Text(it, color=MaterialTheme.colorScheme.error) }
             }
+            Spacer(Modifier.height(24.dp))
 
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // Move controls
-            Column(modifier = Modifier.fillMaxWidth()) {
-                OutlinedTextField(
-                    value = moveStartText,
-                    onValueChange = { moveStartText = it },
-                    label = { Text("Move Start (sec)") },
-                    modifier = Modifier.fillMaxWidth(),
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Number,
-                        imeAction = ImeAction.Next
-                    ),
-                    keyboardActions = KeyboardActions(
-                        onNext = { focusManager.clearFocus() }
-                    )
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = moveEndText,
-                    onValueChange = { moveEndText = it },
-                    label = { Text("Move End (sec)") },
-                    modifier = Modifier.fillMaxWidth(),
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Number,
-                        imeAction = ImeAction.Next
-                    ),
-                    keyboardActions = KeyboardActions(
-                        onNext = { focusManager.clearFocus() }
-                    )
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = moveDestText,
-                    onValueChange = { moveDestText = it },
-                    label = { Text("Insert After (sec)") },
-                    modifier = Modifier.fillMaxWidth(),
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Number,
-                        imeAction = ImeAction.Done
-                    ),
-                    keyboardActions = KeyboardActions(
-                        onDone = { focusManager.clearFocus() }
-                    )
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Button(
-                    onClick = {
-                        moveError = null
-                        val startSec = moveStartText.toFloatOrNull()
-                        val endSec = moveEndText.toFloatOrNull()
-                        val destSec = moveDestText.toFloatOrNull()
-                        if (startSec == null || endSec == null || destSec == null ||
-                            startSec < 0f || endSec <= startSec || destSec < 0f
-                        ) {
-                            moveError = "Invalid values"
-                        } else {
-                            val movedFile =
-                                moveWavSegment(currentFilePath, startSec, endSec, destSec)
-                            if (movedFile != null) {
-                                currentFilePath = movedFile.absolutePath
-                                moveStartText = ""
-                                moveEndText = ""
-                                moveDestText = ""
-                            } else {
-                                moveError = "Move failed"
-                            }
-                        }
-                    },
-                    modifier = Modifier.align(Alignment.End)
-                ) {
-                    Text("Move Segment")
+            // reorder controls
+            Text("Reorder Blocks", style=MaterialTheme.typography.headlineSmall)
+            Text(
+                "Order: " + blocks.sortedBy { it.currentIndex }
+                    .joinToString(",") { it.originalIndex.toString() }
+            )
+            OutlinedTextField(
+                value = reorderFromText,
+                onValueChange = { reorderFromText = it },
+                label = { Text("Move block # (orig index)") },
+                keyboardOptions = KeyboardOptions.Default.copy(keyboardType = KeyboardType.Number)
+            )
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = reorderToText,
+                onValueChange = { reorderToText = it },
+                label = { Text("Insert at position (0-based)") },
+                keyboardOptions = KeyboardOptions.Default.copy(keyboardType = KeyboardType.Number)
+            )
+            Spacer(Modifier.height(8.dp))
+            Button(onClick = {
+                reorderError = null
+                val fromIdx = reorderFromText.toIntOrNull()
+                val toPos   = reorderToText.toIntOrNull()
+                if (fromIdx==null||toPos==null) reorderError="Invalid"
+                else {
+                    val sorted = blocks.sortedBy { it.currentIndex }.toMutableList()
+                    val rem = sorted.indexOfFirst { it.originalIndex==fromIdx }
+                    if (rem<0||toPos<0||toPos>sorted.size) reorderError="Out of range"
+                    else {
+                        val b = sorted.removeAt(rem)
+                        sorted.add(min(toPos, sorted.size), b)
+                        sorted.forEachIndexed{ i, blk-> blk.currentIndex=i }
+                        blocks = sorted
+                        reorderFromText=""; reorderToText=""
+                    }
                 }
-                moveError?.let {
-                    Text(
-                        text = it,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.padding(top = 4.dp)
-                    )
-                }
+            }, Modifier.align(Alignment.End)) {
+                Text("Apply Reorder")
             }
+            Spacer(Modifier.height(8.dp))
+
+            Button(
+                onClick = {
+
+                    // reset every block to its original position
+                    blocks = blocks
+                        .map { it.apply { currentIndex = originalIndex } }
+                        .sortedBy { it.currentIndex }
+                },
+                modifier = Modifier.align(Alignment.End)
+            ) {
+                Text("Reset to Original Order")
+            }
+            reorderError?.let { Text(it, color=MaterialTheme.colorScheme.error) }
         }
     }
 }
-
 // ----- Helper: cutting WAV files -----
 fun cutWavFile(inputPath: String, startSec: Float, endSec: Float): File? {
     return try {
@@ -362,134 +303,9 @@ fun cutWavFile(inputPath: String, startSec: Float, endSec: Float): File? {
     }
 }
 
-// ----- Helper: moving WAV segment -----
-private data class WavInfo(
-    val sampleRate: Int,
-    val channels: Int,
-    val bitDepth: Int,
-    val dataOffset: Long,
-    val dataSize: Int
-)
 
-private fun parseWavHeader(raf: RandomAccessFile): WavInfo? {
-    raf.seek(0)
-    val riffHeader = ByteArray(12)
-    raf.readFully(riffHeader)
-    if (!(riffHeader[0] == 'R'.code.toByte() && riffHeader[1] == 'I'.code.toByte() &&
-                riffHeader[2] == 'F'.code.toByte() && riffHeader[3] == 'F'.code.toByte() &&
-                riffHeader[8] == 'W'.code.toByte() && riffHeader[9] == 'A'.code.toByte() &&
-                riffHeader[10] == 'V'.code.toByte() && riffHeader[11] == 'E'.code.toByte())
-    ) return null
-
-    var sampleRate = 0
-    var channels = 0
-    var bitDepth = 0
-    var dataOffset: Long = -1
-    var dataSize = 0
-
-    while (true) {
-        val chunkHeader = ByteArray(8)
-        if (raf.read(chunkHeader) < 8) break
-        val chunkId = String(chunkHeader, 0, 4)
-        val chunkSize = ByteBuffer.wrap(chunkHeader, 4, 4)
-            .order(ByteOrder.LITTLE_ENDIAN).int
-        when (chunkId) {
-            "fmt " -> {
-                val fmtBytes = ByteArray(chunkSize)
-                raf.readFully(fmtBytes)
-                val fmtBuffer = ByteBuffer.wrap(fmtBytes).order(ByteOrder.LITTLE_ENDIAN)
-                val audioFormat = fmtBuffer.short.toInt() and 0xFFFF
-                if (audioFormat != 1) return null
-                channels = fmtBuffer.short.toInt() and 0xFFFF
-                sampleRate = fmtBuffer.int
-                fmtBuffer.int // byteRate
-                fmtBuffer.short // blockAlign
-                bitDepth = fmtBuffer.short.toInt() and 0xFFFF
-            }
-            "data" -> {
-                dataOffset = raf.filePointer
-                dataSize = chunkSize
-                break
-            }
-            else -> {
-                raf.seek(raf.filePointer + chunkSize)
-            }
-        }
-    }
-    return if (dataOffset >= 0) WavInfo(sampleRate, channels, bitDepth, dataOffset, dataSize) else null
-}
-
-fun moveWavSegment(inputPath: String, startSec: Float, endSec: Float, destSec: Float): File? {
-    return try {
-        val inputFile = File(inputPath)
-        val raf = RandomAccessFile(inputFile, "r")
-        val info = parseWavHeader(raf) ?: run { raf.close(); return null }
-        if (info.channels != 1 || info.sampleRate != 44100 || info.bitDepth != 16) {
-            raf.close()
-            return null
-        }
-
-        val bytesPerSample = info.bitDepth / 8
-        val totalSamples = info.dataSize / bytesPerSample
-        val startSample = (startSec * info.sampleRate).toInt().coerceIn(0, totalSamples)
-        val endSample = (endSec * info.sampleRate).toInt().coerceIn(startSample, totalSamples)
-        val destSample = (destSec * info.sampleRate).toInt().coerceIn(0, totalSamples - (endSample - startSample))
-
-        raf.seek(info.dataOffset)
-        val allData = ByteArray(info.dataSize)
-        raf.readFully(allData)
-
-        fun getBytes(s: Int, e: Int): ByteArray {
-            val bstart = s * bytesPerSample
-            val bend = e * bytesPerSample
-            return allData.copyOfRange(bstart, bend)
-        }
-
-        val bytesA = getBytes(0, startSample)
-        val bytesB = getBytes(startSample, endSample)
-        val bytesC = getBytes(endSample, totalSamples)
-
-        val newData: ByteArray = if (destSample <= startSample) {
-            val part1 = getBytes(0, destSample)
-            val part2 = getBytes(destSample, startSample)
-            part1 + bytesB + part2 + bytesC
-        } else {
-            val part1 = bytesA
-            val part2 = getBytes(endSample, destSample)
-            val part3 = getBytes(destSample, totalSamples)
-            part1 + part2 + bytesB + part3
-        }
-
-        val newDataSize = newData.size
-        val newTotalDataLen = newDataSize + 36
-
-        val outputFile = File(inputFile.parentFile, "moved_${System.currentTimeMillis()}.wav")
-        val outRaf = RandomAccessFile(outputFile, "rw")
-
-        raf.seek(0)
-        val headerBytes = ByteArray(info.dataOffset.toInt())
-        raf.readFully(headerBytes)
-        writeIntLE(headerBytes, 4, newTotalDataLen)
-        writeIntLE(headerBytes, (info.dataOffset + 4).toInt(), newDataSize)
-        outRaf.write(headerBytes)
-        outRaf.write(newData)
-
-        raf.close()
-        outRaf.close()
-        outputFile
-    } catch (e: Exception) {
-        e.printStackTrace()
-        null
-    }
-}
 
 // ----- Utility -----
-private fun writeIntLE(b: ByteArray, offset: Int, value: Int) {
-    b[offset] = (value and 0xFF).toByte()
-    b[offset + 1] = ((value shr 8) and 0xFF).toByte()
-    b[offset + 2] = ((value shr 16) and 0xFF).toByte()
-    b[offset + 3] = ((value shr 24) and 0xFF).toByte()
-}
 
 fun extractAmplitudesFromWav(file: File, sampleEvery: Int = 200): List<Int> {
     val bytes = file.readBytes()
@@ -505,4 +321,60 @@ fun extractAmplitudesFromWav(file: File, sampleEvery: Int = 200): List<Int> {
     }
     return amplitudes
 }
+
+/**
+ * Reads the WAV header (first 44 bytes) and splits the data chunk into equal blocks.
+ * Returns Pair<headerBytes, listOf blocks>.
+ */
+fun splitWavIntoBlocks(file: File, blockSize: Int): Pair<ByteArray, List<WavBlock>> {
+    val all = file.readBytes()
+    require(all.size > 44)
+    val header = all.copyOfRange(0, 44)
+    val data = all.copyOfRange(44, all.size)
+    val count = (data.size + blockSize - 1) / blockSize
+    val blocks = List(count) { idx ->
+        val start = idx * blockSize
+        val end = min(start + blockSize, data.size)
+        WavBlock(originalIndex = idx, currentIndex = idx, data = data.copyOfRange(start, end))
+    }
+    return header to blocks
+}
+
+/**
+ * Rewrites a temp WAV file by concatenating blocks in order of currentIndex.
+ */
+fun writeBlocksToTempFile(
+    context: Context,
+    header: ByteArray,
+    blocks: List<WavBlock>
+): File {
+    // choose cache directory from the passed context
+    val tempDir = context.externalCacheDir ?: context.cacheDir
+    val outFile = File.createTempFile("reorder_", ".wav", tempDir)
+
+    // sort & merge
+    val body = blocks.sortedBy { it.currentIndex }
+        .fold(ByteArray(0)) { acc, b -> acc + b.data }
+
+    // patch header lengths
+    val newTotal = body.size + 36
+    val newHdr = header.copyOf().also {
+        writeIntLE(it, 4, newTotal)
+        writeIntLE(it, 40, body.size)
+    }
+
+    outFile.outputStream().use {
+        it.write(newHdr)
+        it.write(body)
+    }
+    return outFile
+}
+
+fun writeIntLE(b: ByteArray, offset: Int, v: Int) {
+    b[offset] = (v and 0xFF).toByte()
+    b[offset+1] = ((v shr 8) and 0xFF).toByte()
+    b[offset+2] = ((v shr 16) and 0xFF).toByte()
+    b[offset+3] = ((v shr 24) and 0xFF).toByte()
+}
+
 
