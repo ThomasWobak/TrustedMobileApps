@@ -3,7 +3,6 @@ package com.example.mobileappstrusted.screens
 
 import android.content.Context
 import android.media.MediaPlayer
-import android.util.Log
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -16,7 +15,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.example.mobileappstrusted.audio.MerkleHasher
-import com.example.mobileappstrusted.audio.ORIGINAL_MERKLE_ROOT_HASH_CHUNK_IDENTIFIER
 import com.example.mobileappstrusted.components.WaveformView
 import com.example.mobileappstrusted.components.NoPathGivenScreen
 import com.example.mobileappstrusted.dataclass.WavBlock
@@ -26,7 +24,6 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.abs
 import kotlin.math.min
-
 
 private const val BLOCK_SIZE = 100 * 1024  // 100 KB per block, roughly 1.16 seconds
 
@@ -75,8 +72,8 @@ fun EditAudioScreen(filePath: String) {
             playbackFile = writeBlocksToTempFile(context, hdr, blks)
         }
         
-        isOriginal = if (file.exists() && isWav) {
-            MerkleHasher.verifyWavMerkleRoot(file)
+        isOriginal = if (f.exists() && isWav) {
+            MerkleHasher.verifyWavMerkleRoot(f)
         } else null
 
 
