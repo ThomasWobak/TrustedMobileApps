@@ -60,8 +60,10 @@ object MerkleHasher {
             return false
         }
 
-        val (_, blocks) = WavUtils.splitWavIntoBlocks(file)
-
+        var (_, blocks) = WavUtils.splitWavIntoBlocks(file)
+        blocks = blocks
+            .map { it.apply { currentIndex = originalIndex } }
+            .sortedBy { it.currentIndex }
         val recomputedRoot = buildMerkleRoot(blocks)
         val matches = omrhHash.contentEquals(recomputedRoot)
 
