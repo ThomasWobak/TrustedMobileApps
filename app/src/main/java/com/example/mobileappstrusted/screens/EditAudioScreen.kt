@@ -7,6 +7,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+
+import android.content.ContentValues
+import android.provider.MediaStore
+import android.os.Environment
+import android.widget.Toast
+
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -236,7 +242,50 @@ fun EditAudioScreen(filePath: String) {
             ) {
                 Text("Reset to Original Order")
             }
+
             reorderError?.let { Text(it, color=MaterialTheme.colorScheme.error) }
+
+            Spacer(Modifier.height(16.dp))
+            Button(
+                onClick = {
+                    val header = wavHeader
+                    if (header != null) {
+                        try {
+                            val resolver = context.contentResolver
+                            val fileName = "exported_audio_${System.currentTimeMillis()}.wav"
+
+                            val contentValues = ContentValues().apply {
+                                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                                put(MediaStore.MediaColumns.MIME_TYPE, "audio/wav")
+                                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_MUSIC)
+                            }
+
+                            val audioUri = resolver.insert(
+                                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                                contentValues
+                            )
+
+                            if (audioUri != null) {
+                                resolver.openOutputStream(audioUri)?.use { outStream ->
+                                    outStream.write(header)
+                                    blocks.sortedBy { it.currentIndex }.forEach { block ->
+                                        outStream.write(block.data)
+                                    }
+                                    Toast.makeText(context, "Audio exported to Music/$fileName", Toast.LENGTH_LONG).show()
+                                }
+                            } else {
+                                Toast.makeText(context, "Failed to create export file", Toast.LENGTH_SHORT).show()
+                            }
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "Export failed: ${e.message}", Toast.LENGTH_LONG).show()
+                            e.printStackTrace()
+                        }
+                    }
+                },
+                modifier = Modifier.align(Alignment.End)
+            ) {
+                Text("Export Audio")
+            }
         }
     }
 }

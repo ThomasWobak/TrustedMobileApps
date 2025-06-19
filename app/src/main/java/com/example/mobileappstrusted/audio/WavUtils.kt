@@ -1,18 +1,16 @@
 package com.example.mobileappstrusted.audio
 
 import android.content.Context
-import android.util.Log
 import com.example.mobileappstrusted.dataclass.WavBlock
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.abs
-import kotlin.math.min
 
 object WavUtils {
 
     private const val BLOCK_SIZE = 100 * 1024  // 100 KB per block, roughly 1.16 seconds
-    private const val OMRH_BLOCK_SIZE = 40
+
 
     fun extractAmplitudesFromWav(file: File, sampleEvery: Int = 200): List<Int> {
         val bytes = file.readBytes()
@@ -198,4 +196,6 @@ object WavUtils {
         b[offset] = (value.toInt() and 0xff).toByte()
         b[offset + 1] = ((value.toInt() shr 8) and 0xff).toByte()
     }
+
+
 }
