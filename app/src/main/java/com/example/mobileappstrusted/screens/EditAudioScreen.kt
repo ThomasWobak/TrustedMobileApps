@@ -39,6 +39,7 @@ import com.example.mobileappstrusted.audio.WavCutter.cutWavFile
 import com.example.mobileappstrusted.audio.WavUtils.extractAmplitudesFromWav
 import com.example.mobileappstrusted.audio.WavUtils.splitWavIntoBlocks
 import com.example.mobileappstrusted.audio.WavUtils.writeBlocksToTempFile
+import com.example.mobileappstrusted.audio.WavUtils.writeBlocksWithMerkleRoot
 import com.example.mobileappstrusted.components.NoPathGivenScreen
 import com.example.mobileappstrusted.components.WaveformView
 import com.example.mobileappstrusted.dataclass.WavBlock
@@ -267,10 +268,8 @@ fun EditAudioScreen(filePath: String) {
 
                             if (audioUri != null) {
                                 resolver.openOutputStream(audioUri)?.use { outStream ->
-                                    outStream.write(header)
-                                    blocks.sortedBy { it.currentIndex }.forEach { block ->
-                                        outStream.write(block.data)
-                                    }
+                                    val merkleRoot = MerkleHasher.buildMerkleRoot(blocks)
+                                    writeBlocksWithMerkleRoot(outStream, header, blocks, merkleRoot)
                                     Toast.makeText(context, "Audio exported to Music/$fileName", Toast.LENGTH_LONG).show()
                                 }
                             } else {

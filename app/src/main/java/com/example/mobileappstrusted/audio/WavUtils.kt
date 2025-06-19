@@ -197,5 +197,29 @@ object WavUtils {
         b[offset + 1] = ((value.toInt() shr 8) and 0xff).toByte()
     }
 
+    fun writeBlocksWithMerkleRoot(
+        outputStream: java.io.OutputStream,
+        header: ByteArray,
+        blocks: List<WavBlock>,
+        merkleRoot: ByteArray
+    ) {
+        // Write original WAV header
+        outputStream.write(header)
+
+        // Write audio blocks
+        blocks.sortedBy { it.currentIndex }.forEach { block ->
+            outputStream.write(block.data)
+        }
+
+        // Write custom chunk with Merkle root ("omrh")
+        val chunkId = ORIGINAL_MERKLE_ROOT_HASH_CHUNK_IDENTIFIER.toByteArray(Charsets.US_ASCII)
+        val chunkSize = merkleRoot.size
+
+        val sizeBytes = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(chunkSize).array()
+
+        outputStream.write(chunkId)
+        outputStream.write(sizeBytes)
+        outputStream.write(merkleRoot)
+    }
 
 }
