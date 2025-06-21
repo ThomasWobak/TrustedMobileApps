@@ -28,14 +28,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import com.example.mobileappstrusted.audio.MerkleHasher
 import com.example.mobileappstrusted.audio.WavCutter.cutWavFile
 import com.example.mobileappstrusted.audio.WavUtils.extractAmplitudesFromWav
 import com.example.mobileappstrusted.audio.WavUtils.splitWavIntoBlocks
 import com.example.mobileappstrusted.audio.WavUtils.writeBlocksToTempFile
 import com.example.mobileappstrusted.components.NoPathGivenScreen
 import com.example.mobileappstrusted.components.WaveformView
-import com.example.mobileappstrusted.dataclass.WavBlock
+import com.example.mobileappstrusted.cryptography.MerkleHasher
+import com.example.mobileappstrusted.protobuf.WavBlockProtos
 import java.io.File
 import kotlin.math.min
 
@@ -69,7 +69,7 @@ fun EditAudioScreen(filePath: String) {
 
     // header + blocks + playback temp file
     var wavHeader by remember { mutableStateOf<ByteArray?>(null) }
-    var blocks    by remember { mutableStateOf<List<WavBlock>>(emptyList()) }
+    var blocks    by remember { mutableStateOf<List<WavBlockProtos.WavBlock>>(emptyList()) }
     var playbackFile by remember { mutableStateOf<File?>(null) }
 
     // 1) load amplitudes + initial mediaPlayer when path changes
@@ -208,15 +208,23 @@ fun EditAudioScreen(filePath: String) {
                 val toPos   = reorderToText.toIntOrNull()
                 if (fromIdx==null||toPos==null) reorderError="Invalid"
                 else {
-                    val sorted = blocks.sortedBy { it.currentIndex }.toMutableList()
+                    var sorted = blocks.sortedBy { it.currentIndex }.toMutableList()
                     val rem = sorted.indexOfFirst { it.originalIndex==fromIdx }
                     if (rem<0||toPos<0||toPos>sorted.size) reorderError="Out of range"
                     else {
                         val b = sorted.removeAt(rem)
                         sorted.add(min(toPos, sorted.size), b)
-                        sorted.forEachIndexed{ i, blk-> blk.currentIndex=i }
+
+                        sorted = sorted.mapIndexed { i, blk ->
+                            blk.toBuilder()
+                                .setCurrentIndex(i)
+                                .build()
+                        }.toMutableList()
+
                         blocks = sorted
-                        reorderFromText=""; reorderToText=""
+                        reorderFromText = ""
+                        reorderToText = ""
+
                     }
                 }
             }, Modifier.align(Alignment.End)) {
@@ -229,8 +237,9 @@ fun EditAudioScreen(filePath: String) {
 
                     // reset every block to its original position
                     blocks = blocks
-                        .map { it.apply { currentIndex = originalIndex } }
+                        .map { it.toBuilder().setCurrentIndex(it.originalIndex).build() }
                         .sortedBy { it.currentIndex }
+
                 },
                 modifier = Modifier.align(Alignment.End)
             ) {

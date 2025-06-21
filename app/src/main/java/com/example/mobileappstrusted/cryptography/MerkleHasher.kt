@@ -1,7 +1,8 @@
-package com.example.mobileappstrusted.audio
+package com.example.mobileappstrusted.cryptography
 
 import android.util.Log
-import com.example.mobileappstrusted.dataclass.WavBlock
+import com.example.mobileappstrusted.audio.WavUtils
+import com.example.mobileappstrusted.protobuf.WavBlockProtos
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -12,13 +13,13 @@ const val ORIGINAL_MERKLE_ROOT_HASH_CHUNK_IDENTIFIER = "omrh"
 object MerkleHasher {
 
     private val messageDigest = MessageDigest.getInstance("SHA-256")
+
     private fun hashChunk(chunk: ByteArray): ByteArray {
         return messageDigest.digest(chunk)
     }
 
-    fun buildMerkleRoot(blocks: List<WavBlock>): ByteArray {
-
-        var currentLevel = blocks.map { hashChunk(it.data) }
+    fun buildMerkleRoot(blocks: List<WavBlockProtos.WavBlock>): ByteArray {
+        var currentLevel = blocks.map { hashChunk(it.pcmData.toByteArray()) }
 
         while (currentLevel.size > 1) {
             currentLevel = currentLevel.chunked(2).map { pair ->
@@ -27,6 +28,7 @@ object MerkleHasher {
                 hashChunk(left + right)
             }
         }
+
         return currentLevel.first()
     }
 
@@ -40,7 +42,6 @@ object MerkleHasher {
                 .order(ByteOrder.LITTLE_ENDIAN).int
 
             if (chunkId == ORIGINAL_MERKLE_ROOT_HASH_CHUNK_IDENTIFIER) {
-
                 return bytes.sliceArray(offset + 8 until offset + 8 + chunkSize)
             }
 
@@ -49,7 +50,6 @@ object MerkleHasher {
 
         return null
     }
-
 
     fun verifyWavMerkleRoot(file: File): Boolean {
         if (!file.exists() || file.length() <= 44) return false
@@ -60,11 +60,12 @@ object MerkleHasher {
             return false
         }
 
-        var (_, blocks) = WavUtils.splitWavIntoBlocks(file)
-        blocks = blocks
-            .map { it.apply { currentIndex = originalIndex } }
+        val (_, blocks) = WavUtils.splitWavIntoBlocks(file)
+        val sortedBlocks = blocks
+            .map { it.toBuilder().setCurrentIndex(it.originalIndex).build() }
             .sortedBy { it.currentIndex }
-        val recomputedRoot = buildMerkleRoot(blocks)
+
+        val recomputedRoot = buildMerkleRoot(sortedBlocks)
         val matches = omrhHash.contentEquals(recomputedRoot)
 
         if (matches) {
@@ -75,5 +76,4 @@ object MerkleHasher {
 
         return matches
     }
-
 }
