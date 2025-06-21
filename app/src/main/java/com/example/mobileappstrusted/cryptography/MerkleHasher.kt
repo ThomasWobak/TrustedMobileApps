@@ -14,7 +14,7 @@ object MerkleHasher {
 
     private val messageDigest = MessageDigest.getInstance("SHA-256")
 
-    private fun hashChunk(chunk: ByteArray): ByteArray {
+    fun hashChunk(chunk: ByteArray): ByteArray {
         return messageDigest.digest(chunk)
     }
 

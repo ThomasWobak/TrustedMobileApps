@@ -28,7 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import com.example.mobileappstrusted.audio.WavCutter.cutWavFile
+import com.example.mobileappstrusted.audio.WavCutter.markBlockDeleted
 import com.example.mobileappstrusted.audio.WavUtils.extractAmplitudesFromWav
 import com.example.mobileappstrusted.audio.WavUtils.splitWavIntoBlocks
 import com.example.mobileappstrusted.audio.WavUtils.writeBlocksToTempFile
@@ -171,7 +171,8 @@ fun EditAudioScreen(filePath: String) {
                     val e = removeEndText.toFloatOrNull()
                     if (s==null||e==null||s<0f||e<=s) removeError="Invalid"
                     else {
-                        val cf = cutWavFile(currentFilePath,s,e)
+                        val index = if (s?.toDouble() == 0.0) 0 else (s / 1.16).toInt()
+                        val cf = markBlockDeleted(context, currentFilePath, index)
                         if(cf!=null){ currentFilePath=cf.absolutePath; removeStartText=""; removeEndText="" }
                         else removeError="Cut failed"
                     }
