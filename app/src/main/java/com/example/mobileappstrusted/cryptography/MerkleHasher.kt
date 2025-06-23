@@ -12,10 +12,14 @@ const val ORIGINAL_MERKLE_ROOT_HASH_CHUNK_IDENTIFIER = "omrh"
 
 object MerkleHasher {
 
-    private val messageDigest = MessageDigest.getInstance("SHA-256")
+    private val encryptionMessageDigest = MessageDigest.getInstance("SHA-256")
+
+    fun getEncryptionMessageDigest ():  MessageDigest{
+        return encryptionMessageDigest
+    }
 
     fun hashChunk(chunk: ByteArray): ByteArray {
-        return messageDigest.digest(chunk)
+        return encryptionMessageDigest.digest(chunk)
     }
 
     fun buildMerkleRoot(blocks: List<WavBlockProtos.WavBlock>): ByteArray {
