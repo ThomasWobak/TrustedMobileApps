@@ -1,4 +1,3 @@
-// EditAudioScreen.kt
 package com.example.mobileappstrusted.screens
 
 import android.media.MediaPlayer
@@ -28,7 +27,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import com.example.mobileappstrusted.audio.WavCutter.markBlockDeleted
 import com.example.mobileappstrusted.audio.WavUtils.extractAmplitudesFromWav
 import com.example.mobileappstrusted.audio.WavUtils.splitWavIntoBlocks
 import com.example.mobileappstrusted.audio.WavUtils.writeBlocksToTempFile
@@ -53,53 +51,54 @@ fun EditAudioScreen(filePath: String) {
     var isPlaying by remember { mutableStateOf(false) }
 
     var isOriginal by remember { mutableStateOf<Boolean?>(null) }
+    var verificationChecked by remember { mutableStateOf(false) }
 
-    // Cut controls
-
-    var removeStartText by remember { mutableStateOf("") }
-    var removeEndText by remember { mutableStateOf("") }
-    var removeError by remember { mutableStateOf<String?>(null) }
-
-    // reorder controls
     var reorderFromText by remember { mutableStateOf("") }
-    var reorderToText   by remember { mutableStateOf("") }
-    var reorderError    by remember { mutableStateOf<String?>(null) }
+    var reorderToText by remember { mutableStateOf("") }
+    var reorderError by remember { mutableStateOf<String?>(null) }
+
+    var removeBlockText by remember { mutableStateOf("") }
+    var removeBlockError by remember { mutableStateOf<String?>(null) }
+
+    var deletedBlockIndices by remember { mutableStateOf<Set<Int>>(emptySet()) }
 
     val isWav = currentFilePath.lowercase().endsWith(".wav")
 
-    // header + blocks + playback temp file
     var wavHeader by remember { mutableStateOf<ByteArray?>(null) }
-    var blocks    by remember { mutableStateOf<List<WavBlockProtos.WavBlock>>(emptyList()) }
+    var blocks by remember { mutableStateOf<List<WavBlockProtos.WavBlock>>(emptyList()) }
     var playbackFile by remember { mutableStateOf<File?>(null) }
 
-    // 1) load amplitudes + initial mediaPlayer when path changes
     LaunchedEffect(currentFilePath) {
         val f = File(currentFilePath)
-        amplitudes = if (f.exists() && isWav) extractAmplitudesFromWav(f) else emptyList()
-
-        if (isWav) {
+        if (f.exists() && isWav) {
             val (hdr, blks) = splitWavIntoBlocks(f)
             wavHeader = hdr
             blocks = blks
-            playbackFile = writeBlocksToTempFile(context, hdr, blks)
+            deletedBlockIndices = emptySet()
+            val visibleBlocks = blks.filterNot { deletedBlockIndices.contains(it.originalIndex) }
+            playbackFile = writeBlocksToTempFile(context, hdr, visibleBlocks)
+            amplitudes = extractAmplitudesFromWav(playbackFile!!)
+        } else {
+            amplitudes = emptyList()
         }
-        
-        isOriginal = if (f.exists() && isWav) {
-            MerkleHasher.verifyWavMerkleRoot(f)
-        } else null
-
 
         mediaPlayer.reset()
         playbackFile?.let {
             mediaPlayer.setDataSource(it.absolutePath)
             mediaPlayer.prepare()
         }
+
+        if (!verificationChecked && f.exists() && isWav) {
+            isOriginal = MerkleHasher.verifyWavMerkleRoot(f)
+            verificationChecked = true
+        }
     }
 
-    // 2) whenever blocks reorder, rewrite playback + reload player
-    LaunchedEffect(blocks) {
+    LaunchedEffect(blocks, deletedBlockIndices) {
         val hdr = wavHeader ?: return@LaunchedEffect
-        playbackFile = writeBlocksToTempFile(context, hdr, blocks)
+        val visibleBlocks = blocks.filterNot { deletedBlockIndices.contains(it.originalIndex) }
+        playbackFile = writeBlocksToTempFile(context, hdr, visibleBlocks)
+        amplitudes = if (playbackFile != null) extractAmplitudesFromWav(playbackFile!!) else emptyList()
         mediaPlayer.reset()
         playbackFile?.let {
             mediaPlayer.setDataSource(it.absolutePath)
@@ -117,30 +116,29 @@ fun EditAudioScreen(filePath: String) {
             .verticalScroll(rememberScrollState())
             .padding(16.dp)
     ) {
-
         when (isOriginal) {
-            true -> Text("✔️ Verified", color = MaterialTheme.colorScheme.primary)
-            false -> Text("❌ Not Verified", color = MaterialTheme.colorScheme.error)
+            true -> Text("\u2714\uFE0F Verified", color = MaterialTheme.colorScheme.primary)
+            false -> Text("\u274C Not Verified", color = MaterialTheme.colorScheme.error)
             null -> {}
         }
 
-        // play controls
         Text("Edit Audio", style = MaterialTheme.typography.headlineMedium)
         Text("Loaded: ${File(currentFilePath).name}", style = MaterialTheme.typography.bodyLarge)
+
         Row(Modifier.fillMaxWidth()) {
             Button({
-
                 if (!isPlaying) {
                     mediaPlayer.start(); isPlaying = true
                     mediaPlayer.setOnCompletionListener { isPlaying = false }
                 } else {
                     mediaPlayer.pause(); isPlaying = false
                 }
-            }) { Text(if (isPlaying) "Pause" else "Play") }
+            }) {
+                Text(if (isPlaying) "Pause" else "Play")
+            }
         }
         Spacer(Modifier.height(24.dp))
 
-        // waveform
         if (amplitudes.isNotEmpty()) WaveformView(amplitudes)
         else if (isWav) Text("Loading waveform…", style = MaterialTheme.typography.bodyMedium)
         else Text("Cannot display waveform for non-WAV file.", style = MaterialTheme.typography.bodyMedium)
@@ -149,44 +147,52 @@ fun EditAudioScreen(filePath: String) {
         if (!isWav) {
             Text("Editing features only support WAV files.", color = MaterialTheme.colorScheme.error)
         } else {
-            // cut controls (unchanged)
-            Column(Modifier.fillMaxWidth()) {
-                OutlinedTextField(
-                    value = removeStartText,
-                    onValueChange = { removeStartText = it },
-                    label = { Text("Remove Start (sec)") },
-                    keyboardOptions = KeyboardOptions.Default.copy(keyboardType = KeyboardType.Number),
-                )
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = removeEndText,
-                    onValueChange = { removeEndText = it },
-                    label = { Text("Remove End (sec)") },
-                    keyboardOptions = KeyboardOptions.Default.copy(keyboardType = KeyboardType.Number),
-                )
-                Spacer(Modifier.height(8.dp))
-                Button(onClick = {
-                    removeError = null
-                    val s = removeStartText.toFloatOrNull()
-                    val e = removeEndText.toFloatOrNull()
-                    if (s==null||e==null||s<0f||e<=s) removeError="Invalid"
-                    else {
-                        val index = if (s?.toDouble() == 0.0) 0 else (s / 1.16).toInt()
-                        val cf = markBlockDeleted(context, currentFilePath, index)
-                        if(cf!=null){ currentFilePath=cf.absolutePath; removeStartText=""; removeEndText="" }
-                        else removeError="Cut failed"
-                    }
-                }, Modifier.align(Alignment.End)) {
-                    Text("Remove Segment")
+            Text("Remove Block", style = MaterialTheme.typography.headlineSmall)
+            Text(
+                "Visible Order: " + blocks
+                    .filterNot { deletedBlockIndices.contains(it.originalIndex) }
+                    .sortedBy { it.currentIndex }
+                    .joinToString(",") { it.originalIndex.toString() }
+            )
+
+            OutlinedTextField(
+                value = removeBlockText,
+                onValueChange = { removeBlockText = it },
+                label = { Text("Remove block # (original index)") },
+                keyboardOptions = KeyboardOptions.Default.copy(keyboardType = KeyboardType.Number)
+            )
+            Spacer(Modifier.height(8.dp))
+
+            Button(onClick = {
+                removeBlockError = null
+                val indexToRemove = removeBlockText.toIntOrNull()
+                if (indexToRemove == null) {
+                    removeBlockError = "Invalid input"
+                } else if (!blocks.any { it.originalIndex == indexToRemove }) {
+                    removeBlockError = "Block not found"
+                } else if (deletedBlockIndices.contains(indexToRemove)) {
+                    removeBlockError = "Already deleted"
+                } else {
+                    deletedBlockIndices = deletedBlockIndices + indexToRemove
+                    removeBlockText = ""
                 }
-                removeError?.let { Text(it, color=MaterialTheme.colorScheme.error) }
+            }, modifier = Modifier.align(Alignment.End)) {
+                Text("Mark as Deleted")
             }
+            Spacer(Modifier.height(8.dp))
+            Button(onClick = {
+                deletedBlockIndices = emptySet()
+            }, modifier = Modifier.align(Alignment.End)) {
+                Text("Restore All")
+            }
+            removeBlockError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             Spacer(Modifier.height(24.dp))
 
-            // reorder controls
-            Text("Reorder Blocks", style=MaterialTheme.typography.headlineSmall)
+            Text("Reorder Blocks", style = MaterialTheme.typography.headlineSmall)
             Text(
-                "Order: " + blocks.sortedBy { it.currentIndex }
+                "Order: " + blocks
+                    .filterNot { deletedBlockIndices.contains(it.originalIndex) }
+                    .sortedBy { it.currentIndex }
                     .joinToString(",") { it.originalIndex.toString() }
             )
             OutlinedTextField(
@@ -206,12 +212,15 @@ fun EditAudioScreen(filePath: String) {
             Button(onClick = {
                 reorderError = null
                 val fromIdx = reorderFromText.toIntOrNull()
-                val toPos   = reorderToText.toIntOrNull()
-                if (fromIdx==null||toPos==null) reorderError="Invalid"
+                val toPos = reorderToText.toIntOrNull()
+                if (fromIdx == null || toPos == null) reorderError = "Invalid"
                 else {
-                    var sorted = blocks.sortedBy { it.currentIndex }.toMutableList()
-                    val rem = sorted.indexOfFirst { it.originalIndex==fromIdx }
-                    if (rem<0||toPos<0||toPos>sorted.size) reorderError="Out of range"
+                    var sorted = blocks
+                        .filterNot { deletedBlockIndices.contains(it.originalIndex) }
+                        .sortedBy { it.currentIndex }
+                        .toMutableList()
+                    val rem = sorted.indexOfFirst { it.originalIndex == fromIdx }
+                    if (rem < 0 || toPos < 0 || toPos > sorted.size) reorderError = "Out of range"
                     else {
                         val b = sorted.removeAt(rem)
                         sorted.add(min(toPos, sorted.size), b)
@@ -225,28 +234,23 @@ fun EditAudioScreen(filePath: String) {
                         blocks = sorted
                         reorderFromText = ""
                         reorderToText = ""
-
                     }
                 }
             }, Modifier.align(Alignment.End)) {
                 Text("Apply Reorder")
             }
             Spacer(Modifier.height(8.dp))
-
-            Button(
-                onClick = {
-
-                    // reset every block to its original position
-                    blocks = blocks
-                        .map { it.toBuilder().setCurrentIndex(it.originalIndex).build() }
-                        .sortedBy { it.currentIndex }
-
-                },
-                modifier = Modifier.align(Alignment.End)
-            ) {
+            Button(onClick = {
+                blocks = blocks
+                    .map { it.toBuilder().setCurrentIndex(it.originalIndex).build() }
+                    .sortedBy { it.currentIndex }
+            }, modifier = Modifier.align(Alignment.End)) {
                 Text("Reset to Original Order")
             }
-            reorderError?.let { Text(it, color=MaterialTheme.colorScheme.error) }
+            reorderError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+
+            Spacer(Modifier.height(16.dp))
+            Text("Deleted Blocks: ${deletedBlockIndices.sorted().joinToString(", ")}")
         }
     }
 }

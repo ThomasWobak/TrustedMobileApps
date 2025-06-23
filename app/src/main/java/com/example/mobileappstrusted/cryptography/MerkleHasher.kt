@@ -19,7 +19,13 @@ object MerkleHasher {
     }
 
     fun buildMerkleRoot(blocks: List<WavBlockProtos.WavBlock>): ByteArray {
-        var currentLevel = blocks.map { hashChunk(it.pcmData.toByteArray()) }
+        var currentLevel = blocks.map {
+            if (it.isDeleted && it.undeletedHash != null) {
+                it.undeletedHash.toByteArray()
+            } else {
+                hashChunk(it.pcmData.toByteArray())
+            }
+        }
 
         while (currentLevel.size > 1) {
             currentLevel = currentLevel.chunked(2).map { pair ->
@@ -31,6 +37,7 @@ object MerkleHasher {
 
         return currentLevel.first()
     }
+
 
     private fun extractMerkleRootFromWav(file: File): ByteArray? {
         val bytes = file.readBytes()

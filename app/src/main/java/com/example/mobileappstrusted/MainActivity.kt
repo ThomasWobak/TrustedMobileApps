@@ -2,8 +2,11 @@
 //TODO cybersecurity
 // ============================
 //TODO: Implement cutting of audio (Double check hash tree, check edit history if matching current index order)
+//Comment: Need edit history for this
 //TODO: Implement removing of audio (Encrypt with Password, append hash of unencrypted block, use hash of block in root hash checking if deleted)
+//Comment: Need export functionality for this
 //TODO: Implement digital signature stuff
+//Comment: Need export functionality for this
 //TODO: Implement validate Recording (Almost done --> need removing and cutting to validate properly)
 //TODO: Implement validate imported Audio
 // Lukas
@@ -44,12 +47,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavType
-import androidx.navigation.compose.*
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.example.mobileappstrusted.components.BottomBar
 import com.example.mobileappstrusted.navigation.NavScreen
 import com.example.mobileappstrusted.screens.EditAudioScreen
 import com.example.mobileappstrusted.screens.HomeScreen
-import com.example.mobileappstrusted.components.BottomBar
 import com.example.mobileappstrusted.screens.RecordAudioScreen
 import com.example.mobileappstrusted.ui.theme.MobileAppsTrustedTheme
 import java.net.URLDecoder
