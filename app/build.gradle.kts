@@ -62,7 +62,7 @@ protobuf {
     }
     generateProtoTasks {
         all().forEach {
-            it.builtins.create("java") // ✅ Back to Java
+            it.builtins.create("java")
         }
     }
 }
