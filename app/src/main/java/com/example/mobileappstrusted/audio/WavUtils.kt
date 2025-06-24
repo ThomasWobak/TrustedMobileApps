@@ -1,7 +1,9 @@
 package com.example.mobileappstrusted.audio
 
 import android.content.Context
-import com.example.mobileappstrusted.dataclass.WavBlock
+import com.example.mobileappstrusted.cryptography.MerkleHasher
+import com.example.mobileappstrusted.cryptography.ORIGINAL_MERKLE_ROOT_HASH_CHUNK_IDENTIFIER
+import com.example.mobileappstrusted.protobuf.WavBlockProtos
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -27,16 +29,15 @@ object WavUtils {
         return amplitudes
     }
 
-    fun splitWavIntoBlocks(file: File): Pair<ByteArray, List<WavBlock>> {
+    fun splitWavIntoBlocks(file: File): Pair<ByteArray, List<WavBlockProtos.WavBlock>> {
         return splitWavIntoBlocks(file.readBytes())
     }
 
-    fun splitWavIntoBlocks(bytes: ByteArray): Pair<ByteArray, List<WavBlock>> {
+    fun splitWavIntoBlocks(bytes: ByteArray): Pair<ByteArray, List<WavBlockProtos.WavBlock>> {
         require(bytes.size >= 44)
-
         val header = bytes.copyOfRange(0, 44)
-
         val (dataStart, dataSize) = findDataChunk(bytes)
+
         if (dataStart + dataSize > bytes.size) {
             throw IllegalStateException("Data chunk size exceeds file length.")
         }
@@ -47,47 +48,58 @@ object WavUtils {
         return header to blocks
     }
 
-    fun chunkRawPcm(pcm: ByteArray): List<WavBlock> {
-        val count = (pcm.size + BLOCK_SIZE - 1) / BLOCK_SIZE
-        return List(count) { idx ->
-            val start = idx * BLOCK_SIZE
-            val end = minOf(start + BLOCK_SIZE, pcm.size)
-            WavBlock(
-                originalIndex = idx,
-                currentIndex = idx,
-                data = pcm.copyOfRange(start, end),
-                isDeleted = false
-            )
+    fun chunkRawPcm(pcm: ByteArray): List<WavBlockProtos.WavBlock> {
+        val blocks = mutableListOf<WavBlockProtos.WavBlock>()
+        var offset = 0
+        var index = 0
+
+        while (offset < pcm.size) {
+            val end = minOf(offset + BLOCK_SIZE, pcm.size)
+            val chunkBytes = pcm.copyOfRange(offset, end)
+
+            try {
+                val block = WavBlockProtos.WavBlock.parseFrom(chunkBytes)
+                blocks.add(block)
+            } catch (e: Exception) {
+                // Fallback: create new block from raw PCM
+                val block = WavBlockProtos.WavBlock.newBuilder()
+                    .setOriginalIndex(index)
+                    .setCurrentIndex(index)
+                    .setIsDeleted(false)
+                    .setUndeletedHash(com.google.protobuf.ByteString.EMPTY)
+                    .setPcmData(com.google.protobuf.ByteString.copyFrom(chunkBytes))
+                    .build()
+                blocks.add(block)
+            }
+
+            offset = end
+            index++
         }
+
+        return blocks
     }
 
     fun findDataChunk(bytes: ByteArray): Pair<Int, Int> {
         var offset = 12 // skip RIFF header
-
         while (offset + 8 <= bytes.size) {
             val id = String(bytes, offset, 4, Charsets.US_ASCII)
             val size = ByteBuffer.wrap(bytes, offset + 4, 4).order(ByteOrder.LITTLE_ENDIAN).int
-
-            if (id == "data") {
-                return offset + 8 to size // start of PCM, and its length
-            }
-
+            if (id == "data") return offset + 8 to size // start of PCM and its length
             offset += 8 + size
         }
-
         throw IllegalStateException("Could not find 'data' chunk.")
     }
 
     fun writeBlocksToTempFile(
         context: Context,
         header: ByteArray,
-        blocks: List<WavBlock>
+        blocks: List<WavBlockProtos.WavBlock>
     ): File {
         val tempDir = context.externalCacheDir ?: context.cacheDir
         val outFile = File.createTempFile("reorder_", ".wav", tempDir)
 
         val body = blocks.sortedBy { it.currentIndex }
-            .fold(ByteArray(0)) { acc, b -> acc + b.data }
+            .fold(ByteArray(0)) { acc, b -> acc + b.pcmData.toByteArray() }
 
         val newTotal = body.size + 36
         val newHdr = header.copyOf().also {
@@ -102,14 +114,6 @@ object WavUtils {
         return outFile
     }
 
-    fun writeIntLE(b: ByteArray, offset: Int, v: Int) {
-        b[offset] = (v and 0xFF).toByte()
-        b[offset + 1] = ((v shr 8) and 0xFF).toByte()
-        b[offset + 2] = ((v shr 16) and 0xFF).toByte()
-        b[offset + 3] = ((v shr 24) and 0xFF).toByte()
-    }
-
-    /** WAV-writing helper (used with raw PCM input) */
     fun writeWavFile(
         pcmData: ByteArray,
         outputFile: File,
@@ -120,9 +124,7 @@ object WavUtils {
         val byteRate = sampleRate * channels * bitDepth / 8
         val audioDataSize = pcmData.size
 
-        val merkleRoot = MerkleHasher.buildMerkleRoot(
-            chunkRawPcm(pcmData)
-        )
+        val merkleRoot = MerkleHasher.buildMerkleRoot(chunkRawPcm(pcmData))
         val merkleChunkSize = merkleRoot.size
 
         val chunkFmtSize = 16
@@ -182,7 +184,13 @@ object WavUtils {
             out.write(chunkSizeBytes)
             out.write(merkleRoot)
         }
+    }
 
+    fun writeIntLE(b: ByteArray, offset: Int, v: Int) {
+        b[offset] = (v and 0xFF).toByte()
+        b[offset + 1] = ((v shr 8) and 0xFF).toByte()
+        b[offset + 2] = ((v shr 16) and 0xFF).toByte()
+        b[offset + 3] = ((v shr 24) and 0xFF).toByte()
     }
 
     fun writeInt(b: ByteArray, offset: Int, value: Int) {
@@ -200,7 +208,7 @@ object WavUtils {
     fun writeBlocksWithMerkleRoot(
         outputStream: java.io.OutputStream,
         header: ByteArray,
-        blocks: List<WavBlock>,
+        blocks: List<WavBlockProtos.WavBlock>,
         merkleRoot: ByteArray
     ) {
         // Write original WAV header
@@ -208,7 +216,7 @@ object WavUtils {
 
         // Write audio blocks
         blocks.sortedBy { it.currentIndex }.forEach { block ->
-            outputStream.write(block.data)
+            outputStream.write(block.pcmData.toByteArray())
         }
 
         // Write custom chunk with Merkle root ("omrh")

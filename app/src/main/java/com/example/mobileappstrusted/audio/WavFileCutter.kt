@@ -1,78 +1,39 @@
 package com.example.mobileappstrusted.audio
 
+import android.content.Context
+import android.util.Log
+import com.example.mobileappstrusted.cryptography.MerkleHasher
 import java.io.File
-import java.io.RandomAccessFile
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 
 object WavCutter {
 
-    fun cutWavFile(inputPath: String, startSec: Float, endSec: Float): File? {
+    fun markBlockDeleted(context: Context,inputPath: String, blockIndex: Int): File? {
+        val inputFile = File(inputPath)
         return try {
-            val inputFile = File(inputPath)
-            val raf = RandomAccessFile(inputFile, "r")
+            val (header, blocks) = WavUtils.splitWavIntoBlocks(inputFile)
 
-            val header = ByteArray(44)
-            raf.readFully(header)
-            val sampleRate =
-                ByteBuffer.wrap(header, 24, 4).order(ByteOrder.LITTLE_ENDIAN).int
-            val channels =
-                ByteBuffer.wrap(header, 22, 2).order(ByteOrder.LITTLE_ENDIAN).short.toInt()
-            val bitDepth =
-                ByteBuffer.wrap(header, 34, 2).order(ByteOrder.LITTLE_ENDIAN).short.toInt()
+            if (blockIndex !in blocks.indices) return inputFile
 
-            if (channels != 1 || sampleRate != 44100 || bitDepth != 16) {
-                raf.close()
-                return null
+            val updatedBlocks = blocks.mapIndexed { i, block ->
+                if (i == blockIndex) {
+                    val undeletedHash = MerkleHasher.hashChunk(block.pcmData.toByteArray())
+                    block.toBuilder()
+                        .setIsDeleted(true)
+                        .setUndeletedHash(com.google.protobuf.ByteString.copyFrom(undeletedHash))
+                        .build()
+                } else {
+                    block
+                }
             }
 
-            val bytesPerSample = bitDepth / 8
-            val dataSize = inputFile.length().toInt() - 44
-            val totalSamples = dataSize / bytesPerSample
+            Log.w("AudioDebug", "Block deleted with index$blockIndex")
 
-            val startSample = (startSec * sampleRate).toInt().coerceIn(0, totalSamples)
-            val endSample = (endSec * sampleRate).toInt().coerceIn(startSample, totalSamples)
-            val samplesBefore = startSample
-            val samplesAfter = totalSamples - endSample
-            val newDataSize = (samplesBefore + samplesAfter) * bytesPerSample
-            val newTotalDataLen = newDataSize + 36
-
-            val outputFile = File(inputFile.parentFile, "cut_${System.currentTimeMillis()}.wav")
-            val outRaf = RandomAccessFile(outputFile, "rw")
-
-            val newHeader = header.copyOf()
-            WavUtils.writeIntLE(newHeader, 4, newTotalDataLen)
-            WavUtils.writeIntLE(newHeader, 40, newDataSize)
-            outRaf.write(newHeader)
-
-            val buffer = ByteArray(4096)
-            raf.seek(44)
-            var bytesToCopy = samplesBefore * bytesPerSample
-            while (bytesToCopy > 0) {
-                val toRead = minOf(buffer.size, bytesToCopy)
-                val read = raf.read(buffer, 0, toRead)
-                if (read == -1) break
-                outRaf.write(buffer, 0, read)
-                bytesToCopy -= read
-            }
-
-            raf.seek((44 + endSample * bytesPerSample).toLong())
-            bytesToCopy = samplesAfter * bytesPerSample
-            while (bytesToCopy > 0) {
-                val toRead = minOf(buffer.size, bytesToCopy)
-                val read = raf.read(buffer, 0, toRead)
-                if (read == -1) break
-                outRaf.write(buffer, 0, read)
-                bytesToCopy -= read
-            }
-
-            raf.close()
-            outRaf.close()
-            outputFile
+            val outputFile = File(inputFile.parentFile, "deleted_${System.currentTimeMillis()}.wav")
+            WavUtils.writeBlocksToTempFile(context, header, updatedBlocks)
+            return outputFile
         } catch (e: Exception) {
             e.printStackTrace()
-            null
+            inputFile
         }
     }
 }
-
