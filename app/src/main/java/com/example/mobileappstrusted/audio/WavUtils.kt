@@ -65,6 +65,7 @@ object WavUtils {
                 val block = WavBlockProtos.WavBlock.parseFrom(chunkBytes)
                 blocks.add(block)
             } catch (e: Exception) {
+
                 // Fallback: create new block from raw PCM
                 val block = WavBlockProtos.WavBlock.newBuilder()
                     .setOriginalIndex(index)
@@ -237,7 +238,7 @@ object WavUtils {
 
         // Write audio blocks
         blocks.sortedBy { it.currentIndex }.forEach { block ->
-            outputStream.write(block.pcmData.toByteArray())
+            outputStream.write(block.toByteArray())
         }
 
         // Write custom chunk with Merkle root ("omrh")
@@ -295,6 +296,130 @@ object WavUtils {
         }
 
         return null
+    }
+
+
+
+    fun reverseEdits(
+        blocks: List<WavBlockProtos.WavBlock>,
+        deletedBlockIndices: Set<Int>,
+        editHistory: EditHistoryProto.EditHistory
+    ): Pair<List<WavBlockProtos.WavBlock>, Set<Int>> {
+
+        var currentBlocks = blocks.toMutableList()
+        val currentDeleted = deletedBlockIndices.toMutableSet()
+
+        val reversedHistory = editHistory.entriesList.reversed()
+
+        for (entry in reversedHistory) {
+            when (entry.changeType) {
+                EditHistoryProto.ChangeType.DELETE_BLOCK -> {
+                    val idx = entry.detailsMap["blockIndex"]?.toIntOrNull()
+                    if (idx != null) currentDeleted.remove(idx)
+                }
+
+                EditHistoryProto.ChangeType.REORDER_BLOCK -> {
+                    val moved = entry.detailsMap["Moved Block"] ?: continue
+                    val match = Regex("""from (\d+) to (\d+)""").find(moved)
+                    val fromIndex = match?.groupValues?.getOrNull(1)?.toIntOrNull() ?: continue
+                    val toIndex = match.groupValues.getOrNull(2)?.toIntOrNull() ?: continue
+
+                    val sorted = currentBlocks.filterNot { currentDeleted.contains(it.originalIndex) }
+                        .sortedBy { it.currentIndex }
+                        .toMutableList()
+
+                    if (toIndex >= sorted.size || fromIndex > sorted.size) continue
+
+                    // Remove the block at position `toIndex` (where it was moved to)
+                    val movedBlock = sorted.removeAt(toIndex)
+
+                    // Insert it back at position `fromIndex` (where it came from)
+                    sorted.add(fromIndex, movedBlock)
+
+                    // Reassign currentIndex values to reflect new order
+                    currentBlocks = sorted.mapIndexed { i, b ->
+                        b.toBuilder().setCurrentIndex(i).build()
+                    }.toMutableList()
+                }
+
+
+                EditHistoryProto.ChangeType.RESTORE_ORDER -> {
+                    currentBlocks = currentBlocks
+                        .map { it.toBuilder().setCurrentIndex(it.originalIndex).build() }
+                        .sortedBy { it.currentIndex }
+                        .toMutableList()
+                }
+
+                else -> {}
+            }
+        }
+
+        return currentBlocks to currentDeleted
+    }
+
+
+    fun undoLastEdit(
+        blocks: List<WavBlockProtos.WavBlock>,
+        deletedBlockIndices: Set<Int>,
+        editHistory: EditHistoryProto.EditHistory
+    ): Triple<List<WavBlockProtos.WavBlock>, Set<Int>, EditHistoryProto.EditHistory> {
+
+        if (editHistory.entriesList.isEmpty()) return Triple(blocks, deletedBlockIndices, editHistory)
+
+        val last = editHistory.entriesList.last()
+        val newHistory = EditHistoryProto.EditHistory.newBuilder()
+            .addAllEntries(editHistory.entriesList.dropLast(1)) // remove last
+            .build()
+
+        var currentBlocks = blocks.toMutableList()
+        var currentDeleted = deletedBlockIndices.toMutableSet()
+
+        when (last.changeType) {
+            EditHistoryProto.ChangeType.DELETE_BLOCK -> {
+                val idx = last.detailsMap["blockIndex"]?.toIntOrNull()
+                if (idx != null) currentDeleted.remove(idx)
+            }
+
+            EditHistoryProto.ChangeType.RESTORE_BLOCK -> {
+                // Cannot undo “restore all” without more data
+                // Could reapply deletions if you tracked previous deletions
+            }
+
+            EditHistoryProto.ChangeType.REORDER_BLOCK -> {
+                val moved = last.detailsMap["Moved Block"] ?: return Triple(blocks, deletedBlockIndices, editHistory)
+                val match = Regex("""from (\d+) to (\d+)""").find(moved)
+                val fromIndex = match?.groupValues?.getOrNull(1)?.toIntOrNull() ?: return Triple(blocks, deletedBlockIndices, editHistory)
+                val toIndex = match.groupValues.getOrNull(2)?.toIntOrNull() ?: return Triple(blocks, deletedBlockIndices, editHistory)
+
+                val sorted = currentBlocks.filterNot { currentDeleted.contains(it.originalIndex) }
+                    .sortedBy { it.currentIndex }
+                    .toMutableList()
+
+                if (toIndex >= sorted.size || fromIndex > sorted.size) return Triple(blocks, deletedBlockIndices, editHistory)
+
+                // Remove the block at position `toIndex` (where it was moved to)
+                val movedBlock = sorted.removeAt(toIndex)
+
+                // Insert it back at position `fromIndex` (where it came from)
+                sorted.add(fromIndex, movedBlock)
+
+                // Reassign currentIndex values to reflect new order
+                currentBlocks = sorted.mapIndexed { i, b ->
+                    b.toBuilder().setCurrentIndex(i).build()
+                }.toMutableList()
+            }
+
+            EditHistoryProto.ChangeType.RESTORE_ORDER -> {
+                currentBlocks = currentBlocks
+                    .map { it.toBuilder().setCurrentIndex(it.originalIndex).build() }
+                    .sortedBy { it.currentIndex }
+                    .toMutableList()
+            }
+
+            else -> {}
+        }
+
+        return Triple(currentBlocks, currentDeleted, newHistory)
     }
 
 }

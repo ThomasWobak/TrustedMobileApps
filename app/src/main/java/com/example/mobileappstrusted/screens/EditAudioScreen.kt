@@ -36,7 +36,9 @@ import com.example.mobileappstrusted.audio.WavUtils.extractAmplitudesFromWav
 import com.example.mobileappstrusted.audio.WavUtils.extractEditHistoryFromWav
 import com.example.mobileappstrusted.audio.WavUtils.getDeviceId
 import com.example.mobileappstrusted.audio.WavUtils.getDeviceName
+import com.example.mobileappstrusted.audio.WavUtils.reverseEdits
 import com.example.mobileappstrusted.audio.WavUtils.splitWavIntoBlocks
+import com.example.mobileappstrusted.audio.WavUtils.undoLastEdit
 import com.example.mobileappstrusted.audio.WavUtils.writeBlocksToTempFile
 import com.example.mobileappstrusted.audio.WavUtils.writeBlocksWithMetadata
 import com.example.mobileappstrusted.components.NoPathGivenScreen
@@ -240,7 +242,7 @@ fun EditAudioScreen(filePath: String) {
             OutlinedTextField(
                 value = reorderFromText,
                 onValueChange = { reorderFromText = it },
-                label = { Text("Move block # (orig index)") },
+                label = { Text("Move block # (current index, 0-based)") },
                 keyboardOptions = KeyboardOptions.Default.copy(keyboardType = KeyboardType.Number)
             )
             Spacer(Modifier.height(8.dp))
@@ -255,17 +257,19 @@ fun EditAudioScreen(filePath: String) {
                 reorderError = null
                 val fromIdx = reorderFromText.toIntOrNull()
                 val toPos = reorderToText.toIntOrNull()
-                if (fromIdx == null || toPos == null) reorderError = "Invalid"
-                else {
+                if (fromIdx == null || toPos == null) {
+                    reorderError = "Invalid"
+                } else {
                     var sorted = blocks
                         .filterNot { deletedBlockIndices.contains(it.originalIndex) }
                         .sortedBy { it.currentIndex }
                         .toMutableList()
-                    val rem = sorted.indexOfFirst { it.originalIndex == fromIdx }
-                    if (rem < 0 || toPos < 0 || toPos > sorted.size) reorderError = "Out of range"
-                    else {
-                        val b = sorted.removeAt(rem)
-                        sorted.add(min(toPos, sorted.size), b)
+
+                    if (fromIdx !in sorted.indices || toPos !in 0..sorted.size) {
+                        reorderError = "Out of range"
+                    } else {
+                        val block = sorted.removeAt(fromIdx)
+                        sorted.add(min(toPos, sorted.size), block)
 
                         sorted = sorted.mapIndexed { i, blk ->
                             blk.toBuilder()
@@ -287,7 +291,8 @@ fun EditAudioScreen(filePath: String) {
                         editHistoryEntries.add(entry)
                     }
                 }
-            }, Modifier.align(Alignment.End)) {
+            }
+            , Modifier.align(Alignment.End)) {
                 Text("Apply Reorder")
             }
             Spacer(Modifier.height(8.dp))
@@ -357,7 +362,42 @@ fun EditAudioScreen(filePath: String) {
             ) {
                 Text("Export Audio")
             }
+            Button(
+                onClick = {
+                    val (newBlocks, newDeleted, newHistory) = undoLastEdit(blocks, deletedBlockIndices, editHistory = EditHistoryProto.EditHistory.newBuilder()
+                        .addAllEntries(editHistoryEntries)
+                        .build())
+                    blocks = newBlocks
+                    deletedBlockIndices = newDeleted
+                    editHistoryEntries.clear()
+                    editHistoryEntries.addAll(newHistory.entriesList)
 
+
+                    Toast.makeText(context, "Last state restored from edit history", Toast.LENGTH_SHORT).show()
+                },
+                modifier = Modifier.align(Alignment.End)
+            ) {
+                Text("Undo last edit")
+            }
+
+            Button(
+                onClick = {
+                    val reversed = reverseEdits(
+                        blocks = blocks,
+                        deletedBlockIndices = deletedBlockIndices,
+                        editHistory = EditHistoryProto.EditHistory.newBuilder()
+                            .addAllEntries(editHistoryEntries)
+                            .build()
+                    )
+                    blocks = reversed.first
+                    deletedBlockIndices = reversed.second
+
+                    Toast.makeText(context, "Original state restored from edit history", Toast.LENGTH_SHORT).show()
+                },
+                modifier = Modifier.align(Alignment.End)
+            ) {
+                Text("Restore Original File")
+            }
             Spacer(Modifier.height(32.dp))
             Text("Edit History:", style = MaterialTheme.typography.headlineSmall)
 
