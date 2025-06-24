@@ -11,7 +11,7 @@ import kotlin.math.abs
 
 object WavUtils {
 
-    private const val BLOCK_SIZE = 100 * 1024  // 100 KB per block
+    private const val BLOCK_SIZE = 100 * 1024  // 100 KB per block, about 1,16 seconds
 
     fun extractAmplitudesFromWav(file: File, sampleEvery: Int = 200): List<Int> {
         val bytes = file.readBytes()
@@ -83,7 +83,7 @@ object WavUtils {
         while (offset + 8 <= bytes.size) {
             val id = String(bytes, offset, 4, Charsets.US_ASCII)
             val size = ByteBuffer.wrap(bytes, offset + 4, 4).order(ByteOrder.LITTLE_ENDIAN).int
-            if (id == "data") return offset + 8 to size
+            if (id == "data") return offset + 8 to size // start of PCM and its length
             offset += 8 + size
         }
         throw IllegalStateException("Could not find 'data' chunk.")

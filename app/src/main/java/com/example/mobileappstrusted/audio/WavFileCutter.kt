@@ -8,11 +8,11 @@ import java.io.File
 object WavCutter {
 
     fun markBlockDeleted(context: Context,inputPath: String, blockIndex: Int): File? {
+        val inputFile = File(inputPath)
         return try {
-            val inputFile = File(inputPath)
             val (header, blocks) = WavUtils.splitWavIntoBlocks(inputFile)
 
-            if (blockIndex !in blocks.indices) return null
+            if (blockIndex !in blocks.indices) return inputFile
 
             val updatedBlocks = blocks.mapIndexed { i, block ->
                 if (i == blockIndex) {
@@ -30,9 +30,10 @@ object WavCutter {
 
             val outputFile = File(inputFile.parentFile, "deleted_${System.currentTimeMillis()}.wav")
             WavUtils.writeBlocksToTempFile(context, header, updatedBlocks)
+            return outputFile
         } catch (e: Exception) {
             e.printStackTrace()
-            null
+            inputFile
         }
     }
 }

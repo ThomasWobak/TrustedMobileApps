@@ -39,7 +39,7 @@ object WavBlockEncryptor {
                         .build()
                 }
             }
-            block // unchanged if not deleted or hash doesnt match (already encrypted????)
+            block // unchanged if not deleted
         }
     }
 }
