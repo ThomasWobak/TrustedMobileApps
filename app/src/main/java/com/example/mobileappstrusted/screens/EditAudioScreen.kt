@@ -6,6 +6,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+
+import android.content.ContentValues
+import android.provider.MediaStore
+import android.os.Environment
+import android.widget.Toast
+
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -30,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import com.example.mobileappstrusted.audio.WavUtils.extractAmplitudesFromWav
 import com.example.mobileappstrusted.audio.WavUtils.splitWavIntoBlocks
 import com.example.mobileappstrusted.audio.WavUtils.writeBlocksToTempFile
+import com.example.mobileappstrusted.audio.WavUtils.writeBlocksWithMerkleRoot
 import com.example.mobileappstrusted.components.NoPathGivenScreen
 import com.example.mobileappstrusted.components.WaveformView
 import com.example.mobileappstrusted.cryptography.MerkleHasher
@@ -64,10 +71,12 @@ fun EditAudioScreen(filePath: String) {
 
     val isWav = currentFilePath.lowercase().endsWith(".wav")
 
+    // header + blocks + playback temp file
     var wavHeader by remember { mutableStateOf<ByteArray?>(null) }
     var blocks by remember { mutableStateOf<List<WavBlockProtos.WavBlock>>(emptyList()) }
     var playbackFile by remember { mutableStateOf<File?>(null) }
 
+    // 1) load amplitudes + initial mediaPlayer when path changes
     LaunchedEffect(currentFilePath) {
         val f = File(currentFilePath)
         if (f.exists() && isWav) {
@@ -122,6 +131,7 @@ fun EditAudioScreen(filePath: String) {
             null -> {}
         }
 
+        // play controls
         Text("Edit Audio", style = MaterialTheme.typography.headlineMedium)
         Text("Loaded: ${File(currentFilePath).name}", style = MaterialTheme.typography.bodyLarge)
 
@@ -139,6 +149,7 @@ fun EditAudioScreen(filePath: String) {
         }
         Spacer(Modifier.height(24.dp))
 
+        // waveform
         if (amplitudes.isNotEmpty()) WaveformView(amplitudes)
         else if (isWav) Text("Loading waveform…", style = MaterialTheme.typography.bodyMedium)
         else Text("Cannot display waveform for non-WAV file.", style = MaterialTheme.typography.bodyMedium)
@@ -251,6 +262,48 @@ fun EditAudioScreen(filePath: String) {
 
             Spacer(Modifier.height(16.dp))
             Text("Deleted Blocks: ${deletedBlockIndices.sorted().joinToString(", ")}")
+
+            reorderError?.let { Text(it, color=MaterialTheme.colorScheme.error) }
+
+            Spacer(Modifier.height(16.dp))
+            Button(
+                onClick = {
+                    val header = wavHeader
+                    if (header != null) {
+                        try {
+                            val resolver = context.contentResolver
+                            val fileName = "exported_audio_${System.currentTimeMillis()}.wav"
+
+                            val contentValues = ContentValues().apply {
+                                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                                put(MediaStore.MediaColumns.MIME_TYPE, "audio/wav")
+                                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_MUSIC)
+                            }
+
+                            val audioUri = resolver.insert(
+                                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                                contentValues
+                            )
+
+                            if (audioUri != null) {
+                                resolver.openOutputStream(audioUri)?.use { outStream ->
+                                    val merkleRoot = MerkleHasher.buildMerkleRoot(blocks)
+                                    writeBlocksWithMerkleRoot(outStream, header, blocks, merkleRoot)
+                                    Toast.makeText(context, "Audio exported to Music/$fileName", Toast.LENGTH_LONG).show()
+                                }
+                            } else {
+                                Toast.makeText(context, "Failed to create export file", Toast.LENGTH_SHORT).show()
+                            }
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "Export failed: ${e.message}", Toast.LENGTH_LONG).show()
+                            e.printStackTrace()
+                        }
+                    }
+                },
+                modifier = Modifier.align(Alignment.End)
+            ) {
+                Text("Export Audio")
+            }
         }
     }
 }

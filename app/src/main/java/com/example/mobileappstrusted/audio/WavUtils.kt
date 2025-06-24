@@ -11,7 +11,8 @@ import kotlin.math.abs
 
 object WavUtils {
 
-    private const val BLOCK_SIZE = 100 * 1024  // 100 KB per block, about 1,16 seconds
+    private const val BLOCK_SIZE = 100 * 1024  // 100 KB per block, roughly 1.16 seconds
+
 
     fun extractAmplitudesFromWav(file: File, sampleEvery: Int = 200): List<Int> {
         val bytes = file.readBytes()
@@ -126,19 +127,35 @@ object WavUtils {
         val merkleRoot = MerkleHasher.buildMerkleRoot(chunkRawPcm(pcmData))
         val merkleChunkSize = merkleRoot.size
 
-        val riffSize = 4 + 8 + 16 + 8 + audioDataSize + 8 + merkleChunkSize
+        val chunkFmtSize = 16
+        val chunkFmtHeader = 8
+        val chunkDataHeader = 8
+        val chunkOmrhHeader = 8
+        val riffHeader = 4
+
+        val riffSize = riffHeader +
+                chunkFmtHeader + chunkFmtSize +
+                chunkDataHeader + audioDataSize +
+                chunkOmrhHeader + merkleChunkSize
+
         val header = ByteArray(44)
 
         // RIFF header
-        header[0] = 'R'.code.toByte(); header[1] = 'I'.code.toByte()
-        header[2] = 'F'.code.toByte(); header[3] = 'F'.code.toByte()
-        writeInt(header, 4, riffSize - 8)
-        header[8] = 'W'.code.toByte(); header[9] = 'A'.code.toByte()
-        header[10] = 'V'.code.toByte(); header[11] = 'E'.code.toByte()
+        header[0] = 'R'.code.toByte()
+        header[1] = 'I'.code.toByte()
+        header[2] = 'F'.code.toByte()
+        header[3] = 'F'.code.toByte()
+        writeInt(header, 4, riffSize - 8) // total length minus first 8 bytes
+        header[8] = 'W'.code.toByte()
+        header[9] = 'A'.code.toByte()
+        header[10] = 'V'.code.toByte()
+        header[11] = 'E'.code.toByte()
 
         // fmt chunk
-        header[12] = 'f'.code.toByte(); header[13] = 'm'.code.toByte()
-        header[14] = 't'.code.toByte(); header[15] = ' '.code.toByte()
+        header[12] = 'f'.code.toByte()
+        header[13] = 'm'.code.toByte()
+        header[14] = 't'.code.toByte()
+        header[15] = ' '.code.toByte()
         writeInt(header, 16, 16)
         writeShort(header, 20, 1)
         writeShort(header, 22, channels.toShort())
@@ -148,8 +165,10 @@ object WavUtils {
         writeShort(header, 34, bitDepth.toShort())
 
         // data chunk
-        header[36] = 'd'.code.toByte(); header[37] = 'a'.code.toByte()
-        header[38] = 't'.code.toByte(); header[39] = 'a'.code.toByte()
+        header[36] = 'd'.code.toByte()
+        header[37] = 'a'.code.toByte()
+        header[38] = 't'.code.toByte()
+        header[39] = 'a'.code.toByte()
         writeInt(header, 40, audioDataSize)
 
         outputFile.outputStream().use { out ->
@@ -185,4 +204,30 @@ object WavUtils {
         b[offset] = (value.toInt() and 0xff).toByte()
         b[offset + 1] = ((value.toInt() shr 8) and 0xff).toByte()
     }
+
+    fun writeBlocksWithMerkleRoot(
+        outputStream: java.io.OutputStream,
+        header: ByteArray,
+        blocks: List<WavBlockProtos.WavBlock>,
+        merkleRoot: ByteArray
+    ) {
+        // Write original WAV header
+        outputStream.write(header)
+
+        // Write audio blocks
+        blocks.sortedBy { it.currentIndex }.forEach { block ->
+            outputStream.write(block.pcmData.toByteArray())
+        }
+
+        // Write custom chunk with Merkle root ("omrh")
+        val chunkId = ORIGINAL_MERKLE_ROOT_HASH_CHUNK_IDENTIFIER.toByteArray(Charsets.US_ASCII)
+        val chunkSize = merkleRoot.size
+
+        val sizeBytes = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(chunkSize).array()
+
+        outputStream.write(chunkId)
+        outputStream.write(sizeBytes)
+        outputStream.write(merkleRoot)
+    }
+
 }
