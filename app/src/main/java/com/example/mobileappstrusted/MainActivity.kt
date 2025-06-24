@@ -11,7 +11,7 @@
 //TODO: Implement validate imported Audio
 // Lukas
 
-//TODO: Implement editing script with metadata and changes (user information)
+//TODO: Implement editing script with metadata and changes (user information) DONE
 //TODO: Implement general metadata on recording (user information)
 // Thomas
 

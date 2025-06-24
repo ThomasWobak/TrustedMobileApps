@@ -33,12 +33,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.example.mobileappstrusted.audio.WavUtils.extractAmplitudesFromWav
-import com.example.mobileappstrusted.audio.WavUtils.extractEditHistoryFromWav
-import com.example.mobileappstrusted.audio.WavUtils.getDeviceId
-import com.example.mobileappstrusted.audio.WavUtils.getDeviceName
-import com.example.mobileappstrusted.audio.WavUtils.reverseEdits
+
+import com.example.mobileappstrusted.audio.EditScriptUtils.extractEditHistoryFromWav
+import com.example.mobileappstrusted.audio.EditScriptUtils.getDeviceId
+import com.example.mobileappstrusted.audio.EditScriptUtils.getDeviceName
+import com.example.mobileappstrusted.audio.EditScriptUtils.reverseEdits
 import com.example.mobileappstrusted.audio.WavUtils.splitWavIntoBlocks
-import com.example.mobileappstrusted.audio.WavUtils.undoLastEdit
+import com.example.mobileappstrusted.audio.EditScriptUtils.undoLastEdit
 import com.example.mobileappstrusted.audio.WavUtils.writeBlocksToTempFile
 import com.example.mobileappstrusted.audio.WavUtils.writeBlocksWithMetadata
 import com.example.mobileappstrusted.components.NoPathGivenScreen
