@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+option java_package = "com.example.mobileappstrusted.protobuf";
+option java_outer_classname = "WavBlockProtos"; //
+
+message WavBlock {
+  int32 original_index = 1;
+  int32 current_index = 2;
+  bool is_deleted = 3;
+  bytes undeleted_hash = 4;
+  bytes pcm_data = 5;
+}
