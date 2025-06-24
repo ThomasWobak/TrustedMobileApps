@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+option java_package = "com.example.mobileappstrusted.protobuf";
+option java_outer_classname = "EditHistoryProto"; //
+
+
+// Enum for types of changes
+enum ChangeType {
+  UNKNOWN = 0;
+  DELETE_BLOCK = 1;
+  RESTORE_BLOCK = 2;
+  REORDER_BLOCK = 3;
+  EXPORT_AUDIO = 4;
+  RESTORE_ORDER=5;
+}
+
+// Represents a single history entry
+message EditHistoryEntry {
+  string user_id = 1;
+  string device_id = 2;
+  int64 timestamp = 3;
+  ChangeType change_type = 4;
+
+  // Optional structured metadata
+  map<string, string> details = 5;
+}
+
+// For storing the full history
+message EditHistory {
+  repeated EditHistoryEntry entries = 1;
+}
