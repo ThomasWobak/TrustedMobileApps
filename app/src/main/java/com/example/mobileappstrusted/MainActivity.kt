@@ -18,11 +18,11 @@
 //TODO: Be able to read .wav files DONE
 //TODO: Implement looking at audio DONE
 //TODO: Implement playback of audio DONE
+//TODO: Implement exporting of edited file DONE
 
 //TODO: Improve cutting of audio (ease of use)
 //TODO: Improve removing of audio (granularity?, ease of use)
 //TODO: Implement menu in editing screen
-//TODO: Implement exporting of edited file
 //TODO: Implement going back using strg+z using temporary in memory editing script
 // Thomas
 
