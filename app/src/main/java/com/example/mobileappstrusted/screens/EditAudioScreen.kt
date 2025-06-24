@@ -6,12 +6,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-
 import android.content.ContentValues
 import android.provider.MediaStore
 import android.os.Environment
 import android.widget.Toast
-
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -25,6 +23,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -34,12 +33,16 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.example.mobileappstrusted.audio.WavUtils.extractAmplitudesFromWav
+import com.example.mobileappstrusted.audio.WavUtils.extractEditHistoryFromWav
+import com.example.mobileappstrusted.audio.WavUtils.getDeviceId
+import com.example.mobileappstrusted.audio.WavUtils.getDeviceName
 import com.example.mobileappstrusted.audio.WavUtils.splitWavIntoBlocks
 import com.example.mobileappstrusted.audio.WavUtils.writeBlocksToTempFile
-import com.example.mobileappstrusted.audio.WavUtils.writeBlocksWithMerkleRoot
+import com.example.mobileappstrusted.audio.WavUtils.writeBlocksWithMetadata
 import com.example.mobileappstrusted.components.NoPathGivenScreen
 import com.example.mobileappstrusted.components.WaveformView
 import com.example.mobileappstrusted.cryptography.MerkleHasher
+import com.example.mobileappstrusted.protobuf.EditHistoryProto
 import com.example.mobileappstrusted.protobuf.WavBlockProtos
 import java.io.File
 import kotlin.math.min
@@ -52,7 +55,13 @@ fun EditAudioScreen(filePath: String) {
         return
     }
 
-    var currentFilePath by remember { mutableStateOf(filePath) }
+    //Edit History
+    val editHistoryEntries = remember { mutableStateListOf<EditHistoryProto.EditHistoryEntry>() }
+
+
+
+
+    val currentFilePath by remember { mutableStateOf(filePath) }
     var amplitudes by remember { mutableStateOf<List<Int>>(emptyList()) }
     val mediaPlayer = remember { MediaPlayer() }
     var isPlaying by remember { mutableStateOf(false) }
@@ -87,6 +96,11 @@ fun EditAudioScreen(filePath: String) {
             val visibleBlocks = blks.filterNot { deletedBlockIndices.contains(it.originalIndex) }
             playbackFile = writeBlocksToTempFile(context, hdr, visibleBlocks)
             amplitudes = extractAmplitudesFromWav(playbackFile!!)
+            // NEW: read edit history from file
+            extractEditHistoryFromWav(f)?.let { history ->
+                editHistoryEntries.clear()
+                editHistoryEntries.addAll(history.entriesList)
+            }
         } else {
             amplitudes = emptyList()
         }
@@ -186,6 +200,15 @@ fun EditAudioScreen(filePath: String) {
                 } else {
                     deletedBlockIndices = deletedBlockIndices + indexToRemove
                     removeBlockText = ""
+                    val entry = EditHistoryProto.EditHistoryEntry.newBuilder()
+                        .setUserId(getDeviceName())
+                        .setDeviceId(getDeviceId(context))
+                        .setTimestamp(System.currentTimeMillis())
+                        .setChangeType(EditHistoryProto.ChangeType.DELETE_BLOCK)
+                        .putDetails("blockIndex", ""+indexToRemove)
+                        .build()
+                    editHistoryEntries.add(entry)
+
                 }
             }, modifier = Modifier.align(Alignment.End)) {
                 Text("Mark as Deleted")
@@ -193,6 +216,14 @@ fun EditAudioScreen(filePath: String) {
             Spacer(Modifier.height(8.dp))
             Button(onClick = {
                 deletedBlockIndices = emptySet()
+                val entry = EditHistoryProto.EditHistoryEntry.newBuilder()
+                    .setUserId(getDeviceName())
+                    .setDeviceId(getDeviceId(context))
+                    .setTimestamp(System.currentTimeMillis())
+                    .setChangeType(EditHistoryProto.ChangeType.RESTORE_BLOCK)
+                    .putDetails("Restored Blocks","AllBlocks")
+                    .build()
+                editHistoryEntries.add(entry)
             }, modifier = Modifier.align(Alignment.End)) {
                 Text("Restore All")
             }
@@ -245,6 +276,15 @@ fun EditAudioScreen(filePath: String) {
                         blocks = sorted
                         reorderFromText = ""
                         reorderToText = ""
+
+                        val entry = EditHistoryProto.EditHistoryEntry.newBuilder()
+                            .setUserId(getDeviceName())
+                            .setDeviceId(getDeviceId(context))
+                            .setTimestamp(System.currentTimeMillis())
+                            .setChangeType(EditHistoryProto.ChangeType.REORDER_BLOCK)
+                            .putDetails("Moved Block", "from $fromIdx to $toPos")
+                            .build()
+                        editHistoryEntries.add(entry)
                     }
                 }
             }, Modifier.align(Alignment.End)) {
@@ -255,6 +295,14 @@ fun EditAudioScreen(filePath: String) {
                 blocks = blocks
                     .map { it.toBuilder().setCurrentIndex(it.originalIndex).build() }
                     .sortedBy { it.currentIndex }
+                val entry = EditHistoryProto.EditHistoryEntry.newBuilder()
+                    .setUserId(getDeviceName())
+                    .setDeviceId(getDeviceId(context))
+                    .setTimestamp(System.currentTimeMillis())
+                    .setChangeType(EditHistoryProto.ChangeType.RESTORE_ORDER)
+                    .putDetails("Restored Order", "Everything in Original Position again")
+                    .build()
+                editHistoryEntries.add(entry)
             }, modifier = Modifier.align(Alignment.End)) {
                 Text("Reset to Original Order")
             }
@@ -288,7 +336,12 @@ fun EditAudioScreen(filePath: String) {
                             if (audioUri != null) {
                                 resolver.openOutputStream(audioUri)?.use { outStream ->
                                     val merkleRoot = MerkleHasher.buildMerkleRoot(blocks)
-                                    writeBlocksWithMerkleRoot(outStream, header, blocks, merkleRoot)
+                                    val editHistory = EditHistoryProto.EditHistory.newBuilder()
+                                        .addAllEntries(editHistoryEntries)
+                                        .build()
+
+                                    writeBlocksWithMetadata(outStream, header, blocks, merkleRoot, editHistory)
+
                                     Toast.makeText(context, "Audio exported to Music/$fileName", Toast.LENGTH_LONG).show()
                                 }
                             } else {
@@ -304,6 +357,21 @@ fun EditAudioScreen(filePath: String) {
             ) {
                 Text("Export Audio")
             }
+
+            Spacer(Modifier.height(32.dp))
+            Text("Edit History:", style = MaterialTheme.typography.headlineSmall)
+
+            if (editHistoryEntries.isEmpty()) {
+                Text("No changes recorded.", style = MaterialTheme.typography.bodyMedium)
+            } else {
+                editHistoryEntries.forEach { entry ->
+                    Text(
+                        "${entry.changeType.name}: ${entry.detailsMap.entries.joinToString()} (${java.util.Date(entry.timestamp)})",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+
         }
     }
 }

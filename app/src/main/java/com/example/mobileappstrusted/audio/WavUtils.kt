@@ -1,10 +1,14 @@
 package com.example.mobileappstrusted.audio
 
+import android.annotation.SuppressLint
 import android.content.Context
+import android.provider.Settings.Secure.*
 import com.example.mobileappstrusted.cryptography.MerkleHasher
 import com.example.mobileappstrusted.cryptography.ORIGINAL_MERKLE_ROOT_HASH_CHUNK_IDENTIFIER
+import com.example.mobileappstrusted.protobuf.EditHistoryProto
 import com.example.mobileappstrusted.protobuf.WavBlockProtos
 import java.io.File
+import java.io.OutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.abs
@@ -81,14 +85,30 @@ object WavUtils {
 
     fun findDataChunk(bytes: ByteArray): Pair<Int, Int> {
         var offset = 12 // skip RIFF header
+
         while (offset + 8 <= bytes.size) {
             val id = String(bytes, offset, 4, Charsets.US_ASCII)
-            val size = ByteBuffer.wrap(bytes, offset + 4, 4).order(ByteOrder.LITTLE_ENDIAN).int
-            if (id == "data") return offset + 8 to size // start of PCM and its length
+            val size = ByteBuffer.wrap(bytes, offset + 4, 4)
+                .order(ByteOrder.LITTLE_ENDIAN)
+                .int
+
+            val chunkDataStart = offset + 8
+            val chunkDataEnd = chunkDataStart + size
+
+            if (chunkDataEnd > bytes.size) {
+                throw IllegalStateException("Chunk $id size exceeds file length.")
+            }
+
+            if (id == "data") {
+                return chunkDataStart to size
+            }
+
             offset += 8 + size
         }
+
         throw IllegalStateException("Could not find 'data' chunk.")
     }
+
 
     fun writeBlocksToTempFile(
         context: Context,
@@ -205,11 +225,12 @@ object WavUtils {
         b[offset + 1] = ((value.toInt() shr 8) and 0xff).toByte()
     }
 
-    fun writeBlocksWithMerkleRoot(
-        outputStream: java.io.OutputStream,
+    fun writeBlocksWithMetadata(
+        outputStream: OutputStream,
         header: ByteArray,
         blocks: List<WavBlockProtos.WavBlock>,
-        merkleRoot: ByteArray
+        merkleRoot: ByteArray,
+        editHistory: EditHistoryProto.EditHistory
     ) {
         // Write original WAV header
         outputStream.write(header)
@@ -220,14 +241,60 @@ object WavUtils {
         }
 
         // Write custom chunk with Merkle root ("omrh")
-        val chunkId = ORIGINAL_MERKLE_ROOT_HASH_CHUNK_IDENTIFIER.toByteArray(Charsets.US_ASCII)
+        val chunkId = "omrh".toByteArray(Charsets.US_ASCII)
         val chunkSize = merkleRoot.size
-
         val sizeBytes = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(chunkSize).array()
 
         outputStream.write(chunkId)
         outputStream.write(sizeBytes)
         outputStream.write(merkleRoot)
+
+        // NEW: Write edit history chunk ("edhi")
+        val historyBytes = editHistory.toByteArray()
+        val historyChunkId = "edhi".toByteArray(Charsets.US_ASCII)
+        val historySizeBytes = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(historyBytes.size).array()
+
+        outputStream.write(historyChunkId)
+        outputStream.write(historySizeBytes)
+        outputStream.write(historyBytes)
+    }
+
+    @SuppressLint("HardwareIds")
+    fun getDeviceId(context: Context): String {
+        return getString(
+            context.contentResolver,
+            ANDROID_ID
+        )
+    }
+    fun getDeviceName(): String {
+        return "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}"
+    }
+
+
+
+    fun extractEditHistoryFromWav(file: File): EditHistoryProto.EditHistory? {
+        val bytes = file.readBytes()
+        var i = 12 // skip RIFF header
+
+        while (i + 8 < bytes.size) {
+            val chunkId = bytes.copyOfRange(i, i + 4).toString(Charsets.US_ASCII)
+            val chunkSize = ByteBuffer.wrap(bytes, i + 4, 4).order(ByteOrder.LITTLE_ENDIAN).int
+            val chunkStart = i + 8
+            val chunkEnd = chunkStart + chunkSize
+
+            if (chunkId == "edhi" && chunkEnd <= bytes.size) {
+                val chunkData = bytes.copyOfRange(chunkStart, chunkEnd)
+                return try {
+                    EditHistoryProto.EditHistory.parseFrom(chunkData)
+                } catch (e: Exception) {
+                    null
+                }
+            }
+
+            i += 8 + chunkSize
+        }
+
+        return null
     }
 
 }
