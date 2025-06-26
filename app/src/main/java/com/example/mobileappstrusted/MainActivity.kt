@@ -23,6 +23,7 @@
 //TODO: Implement playback of audio DONE
 //TODO: Implement exporting of edited file DONE
 
+//TODO: Improve Record Audio Screen (Showing audio being recorded, resuming recording,...)
 //TODO: Improve cutting of audio (ease of use)
 //TODO: Improve removing of audio (granularity?, ease of use)
 //TODO: Implement menu in editing screen
