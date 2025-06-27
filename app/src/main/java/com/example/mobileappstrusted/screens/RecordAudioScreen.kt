@@ -3,8 +3,11 @@ package com.example.mobileappstrusted.screens
 
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.ContentResolver
 import android.content.Context
+import android.media.MediaPlayer
+import androidx.compose.runtime.DisposableEffect
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
@@ -32,22 +35,38 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.example.mobileappstrusted.audio.WavUtils.extractAmplitudesFromWav
 import com.example.mobileappstrusted.audio.WavUtils.writeWavFile
+import com.example.mobileappstrusted.components.WaveformView
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 
+@SuppressLint("MissingPermission")
 @Composable
 fun RecordAudioScreen(onRecordingComplete: (String) -> Unit) {
     val context = LocalContext.current
 
+    //Used for replaying the audio recorded
+    val mediaPlayer = remember { MediaPlayer() }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            mediaPlayer.release()
+        }
+    }
+    //Used to resume recording functionality
+    var hasStoppedRecording by remember { mutableStateOf(false) }
+    val recordedChunks = remember { mutableListOf<Byte>() }
+    var isPlaying by remember { mutableStateOf(false) }
+    var lastTempFile by remember { mutableStateOf<File?>(null) }
+
     var isRecording by remember { mutableStateOf(false) }
     var statusText by remember { mutableStateOf("Press to start recording or import an audio file") }
-    var recordingThread: Thread? by remember { mutableStateOf(null) }
 
     var finishedFilePath by remember { mutableStateOf<String?>(null) }
+    var amplitudes by remember { mutableStateOf<List<Int>>(emptyList()) }
 
-    // Request RECORD_AUDIO permission
     val requestPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -57,7 +76,6 @@ fun RecordAudioScreen(onRecordingComplete: (String) -> Unit) {
         requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
     }
 
-    // Launcher for picking an existing audio file (MIME "audio/*")
     val importAudioLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
@@ -71,33 +89,32 @@ fun RecordAudioScreen(onRecordingComplete: (String) -> Unit) {
             if (importedFile != null) {
                 statusText = "Imported: ${importedFile.name}"
                 finishedFilePath = importedFile.absolutePath
+                amplitudes = emptyList() // optional: update with extractAmplitudesFromWav if you want waveform for imports
             } else {
                 statusText = "Failed to import file."
             }
         }
     }
 
-    val startRecording = {
-        val outputFile = File(
-            context.externalCacheDir ?: context.cacheDir,
-            "record_${System.currentTimeMillis()}.wav"
-        )
-        val sampleRate = 44100
-        val bufferSize = AudioRecord.getMinBufferSize(
-            sampleRate,
-            AudioFormat.CHANNEL_IN_MONO,
-            AudioFormat.ENCODING_PCM_16BIT
-        )
-        val audioRecord = AudioRecord(
+    val sampleRate = 44100
+    val bufferSize = AudioRecord.getMinBufferSize(
+        sampleRate,
+        AudioFormat.CHANNEL_IN_MONO,
+        AudioFormat.ENCODING_PCM_16BIT
+    )
+    val audioRecord = remember {
+        AudioRecord(
             MediaRecorder.AudioSource.MIC,
             sampleRate,
             AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT,
             bufferSize
         )
+    }
 
-        val audioData = mutableListOf<Byte>()
+    val startRecording = {
         isRecording = true
+        hasStoppedRecording = false
         statusText = "Recording..."
         audioRecord.startRecording()
 
@@ -106,23 +123,56 @@ fun RecordAudioScreen(onRecordingComplete: (String) -> Unit) {
             while (isRecording) {
                 val read = audioRecord.read(buffer, 0, buffer.size)
                 if (read > 0) {
-                    audioData.addAll(buffer.copyOf(read).toList())
+                    synchronized(recordedChunks) {
+                        recordedChunks.addAll(buffer.copyOf(read).toList())
+                    }
                 }
             }
             audioRecord.stop()
-            audioRecord.release()
-
-            val wavBytes = audioData.toByteArray()
-            writeWavFile(wavBytes, outputFile, sampleRate, 1, 16)
-            finishedFilePath = outputFile.absolutePath
         }
         thread.start()
-        recordingThread = thread
     }
 
     val stopRecording = {
         isRecording = false
+        hasStoppedRecording = true
         statusText = "Recording stopped"
+
+        val pcm = synchronized(recordedChunks) {
+            recordedChunks.toByteArray()
+        }
+
+        val tempWavFile = File.createTempFile("preview", ".wav", context.cacheDir)
+        writeWavFile(pcm, tempWavFile, sampleRate, 1, 16)
+        amplitudes = extractAmplitudesFromWav(tempWavFile)
+        lastTempFile = tempWavFile
+    }
+
+    val discardAudio = {
+        isRecording = false
+        hasStoppedRecording = false
+        recordedChunks.clear()
+        amplitudes = emptyList()
+        lastTempFile = null
+        isPlaying = false
+        statusText = "Press to start recording or import an audio file"
+        mediaPlayer.reset()
+    }
+
+    val resumeRecording = {
+        startRecording()
+    }
+
+    val finishRecordingAndGoToEdit = {
+        val outputFile = File(
+            context.externalCacheDir ?: context.cacheDir,
+            "record_${System.currentTimeMillis()}.wav"
+        )
+        val finalBytes = synchronized(recordedChunks) {
+            recordedChunks.toByteArray()
+        }
+        writeWavFile(finalBytes, outputFile, sampleRate, 1, 16)
+        onRecordingComplete(outputFile.absolutePath)
     }
 
     Surface(modifier = Modifier.fillMaxSize()) {
@@ -130,7 +180,7 @@ fun RecordAudioScreen(onRecordingComplete: (String) -> Unit) {
             modifier = Modifier
                 .fillMaxSize()
                 .padding(16.dp),
-            verticalArrangement = Arrangement.Center
+            verticalArrangement = Arrangement.Top
         ) {
             Text(
                 statusText,
@@ -138,53 +188,93 @@ fun RecordAudioScreen(onRecordingComplete: (String) -> Unit) {
                 modifier = Modifier.padding(bottom = 16.dp)
             )
 
-            if (finishedFilePath != null) {
-                Text(
-                    text = "Recording done",
-                    style = MaterialTheme.typography.headlineSmall,
-                    modifier = Modifier.padding(bottom = 16.dp)
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly
-                ) {
-                    Button(onClick = {
-                        // Discard: reset everything
-                        finishedFilePath = null
-                        statusText = "Press to start recording or import an audio file"
-                    }) {
-                        Text("Discard")
-                    }
-                    Button(onClick = {
-                        onRecordingComplete(finishedFilePath!!)
-                    }) {
-                        Text("Go to Edit")
-                    }
-                }
-            } else {
+            if (hasStoppedRecording && amplitudes.isNotEmpty()) {
+                WaveformView(amplitudes)
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+
+            // Top buttons
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                 Button(
                     onClick = {
-                        if (!isRecording) startRecording() else stopRecording()
+                        if (isRecording) stopRecording() else startRecording()
                     },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.weight(1f).padding(end = 4.dp)
                 ) {
                     Text(if (isRecording) "Stop Recording" else "Start Recording")
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                if (!isRecording && !hasStoppedRecording) {
+                    Button(
+                        onClick = {
+                            importAudioLauncher.launch(arrayOf("audio/*"))
+                        },
+                        modifier = Modifier.weight(1f).padding(start = 4.dp)
+                    ) {
+                        Text("Import Audio")
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            if (hasStoppedRecording) {
+                if (lastTempFile != null) {
+                    Button(
+                        onClick = {
+                            try {
+                                mediaPlayer.reset()
+                                mediaPlayer.setDataSource(lastTempFile!!.absolutePath)
+                                mediaPlayer.prepare()
+                                mediaPlayer.start()
+                                isPlaying = true
+                                mediaPlayer.setOnCompletionListener {
+                                    isPlaying = false
+                                }
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                                statusText = "Playback failed"
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                    ) {
+                        Text(if (isPlaying) "Playing..." else "Play Audio")
+                    }
+                }
 
                 Button(
-                    onClick = {
-                        importAudioLauncher.launch(arrayOf("audio/*"))
-                    },
-                    modifier = Modifier.fillMaxWidth()
+                    onClick = { discardAudio() },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp)
                 ) {
-                    Text("Import Audio from Filesystem")
+                    Text("Discard Audio")
+                }
+
+                Button(
+                    onClick = { resumeRecording() },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp)
+                ) {
+                    Text("Resume Recording")
+                }
+
+                Button(
+                    onClick = { finishRecordingAndGoToEdit() },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp)
+                ) {
+                    Text("Go to Edit")
                 }
             }
         }
     }
 }
+
 /**
  * Copies a content URI to the app's cache directory, using [prefix] + timestamp + [suffix].
  * Returns the File, or null if failure.
