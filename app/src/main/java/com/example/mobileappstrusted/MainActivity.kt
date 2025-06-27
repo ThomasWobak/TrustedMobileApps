@@ -22,12 +22,12 @@
 //TODO: Implement looking at audio DONE
 //TODO: Implement playback of audio DONE
 //TODO: Implement exporting of edited file DONE
+//TODO: Improve Record Audio Screen (Showing audio being recorded, resuming recording,...) DONE
+//TODO: Implement reversing operation using temporary in memory editing script DONE
 
-//TODO: Improve Record Audio Screen (Showing audio being recorded, resuming recording,...)
 //TODO: Improve cutting of audio (ease of use)
 //TODO: Improve removing of audio (granularity?, ease of use)
 //TODO: Implement menu in editing screen
-//TODO: Implement going back using strg+z using temporary in memory editing script
 // Thomas
 
 
@@ -47,6 +47,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.ui.Modifier
+import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -83,11 +84,18 @@ class MainActivity : ComponentActivity() {
                         //Record
                         composable(NavScreen.Record.route) {
                             RecordAudioScreen { recordedFilePath ->
-                                // Always navigate on the main thread to avoid IllegalStateException
                                 Handler(Looper.getMainLooper()).post {
-                                    navController.navigate(NavScreen.Edit.createRoute(recordedFilePath))
+                                    navController.navigate(NavScreen.Edit.createRoute(recordedFilePath)) {
+                                        popUpTo(navController.graph.findStartDestination().id) {
+                                            inclusive = false
+                                        }
+                                        launchSingleTop = true
+                                        restoreState = false
+                                    }
                                 }
                             }
+
+
                         }
 
                         // Edit with no args → placeholder

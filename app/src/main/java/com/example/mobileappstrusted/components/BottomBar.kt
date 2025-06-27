@@ -1,4 +1,3 @@
-// BottomBar.kt
 package com.example.mobileappstrusted.components
 
 import androidx.compose.material3.Icon
@@ -20,30 +19,37 @@ fun BottomBar(navController: NavHostController) {
         NavScreen.Edit
     )
 
-    // Observe the current back stack so we can highlight the selected item
     val navBackStackEntry by navController.currentBackStackEntryAsState()
-    val currentRoute = navBackStackEntry
-        ?.destination
-        ?.route
-        // If the route is "edit/XYZ", substringBefore("/") gives "edit"
-        ?.substringBefore("/")
+    val currentRoute = navBackStackEntry?.destination?.route?.substringBefore("/")
 
     NavigationBar {
         items.forEach { screen ->
+            val selected = when (screen) {
+                is NavScreen.Edit -> navBackStackEntry?.destination?.route?.startsWith("edit/") == true
+                else -> currentRoute == screen.route
+            }
+
             NavigationBarItem(
                 icon = { Icon(screen.icon, contentDescription = screen.label) },
                 label = { Text(screen.label) },
-                selected = (currentRoute == screen.route),
+                selected = selected,
                 onClick = {
-                    // If we’re already on this destination, do nothing.
-                    if (currentRoute != screen.route) {
-                        navController.navigate(screen.route) {
-                            // Pop up to the start destination to avoid building a large backstack
-                            popUpTo(navController.graph.findStartDestination().id) {
-                                saveState = true
+                    if (!selected) {
+                        //Edit needs dynamic args (filepath), but others don't. So the back stack if cleared first for those
+                        if (screen != NavScreen.Edit) {
+                            navController.navigate(screen.route) {
+                                popUpTo(navController.graph.findStartDestination().id) {
+                                    inclusive = true
+                                    saveState = false
+                                }
+                                launchSingleTop = true
+                                restoreState = false
                             }
-                            launchSingleTop = true
-                            restoreState = true
+                        } else {
+                            navController.navigate(screen.route) {
+                                launchSingleTop = true
+                                restoreState = true
+                            }
                         }
                     }
                 }

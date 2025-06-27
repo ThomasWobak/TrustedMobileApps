@@ -47,6 +47,9 @@ import java.io.IOException
 fun RecordAudioScreen(onRecordingComplete: (String) -> Unit) {
     val context = LocalContext.current
 
+    //fixes bottom navigation
+    var shouldClearState by remember { mutableStateOf(false) }
+
     //Used for replaying the audio recorded
     val mediaPlayer = remember { MediaPlayer() }
 
@@ -172,7 +175,6 @@ fun RecordAudioScreen(onRecordingComplete: (String) -> Unit) {
 
     val finishRecordingAndGoToEdit = {
         if (recordedChunks.isEmpty() && lastTempFile != null) {
-            // Imported file
             onRecordingComplete(lastTempFile!!.absolutePath)
         } else {
             val outputFile = File(
@@ -184,6 +186,28 @@ fun RecordAudioScreen(onRecordingComplete: (String) -> Unit) {
             }
             writeWavFile(finalBytes, outputFile, sampleRate, 1, 16)
             onRecordingComplete(outputFile.absolutePath)
+        }
+
+        shouldClearState = true
+    }
+
+
+
+
+    LaunchedEffect(shouldClearState) {
+        if (shouldClearState) {
+            // Delay to let Edit screen read the path
+            kotlinx.coroutines.delay(500)
+            isRecording = false
+            hasStoppedRecording = false
+            isImported = false
+            recordedChunks.clear()
+            amplitudes = emptyList()
+            lastTempFile = null
+            isPlaying = false
+            statusText = "Press to start recording or import an audio file"
+            mediaPlayer.reset()
+            shouldClearState = false
         }
     }
 
