@@ -113,7 +113,7 @@ fun RecordAudioScreen(onRecordingComplete: (String) -> Unit) {
             audioRecord.release()
 
             val wavBytes = audioData.toByteArray()
-            writeWavFile(wavBytes, outputFile, sampleRate, 1, 16)
+            writeWavFile(wavBytes, outputFile)
             finishedFilePath = outputFile.absolutePath
         }
         thread.start()

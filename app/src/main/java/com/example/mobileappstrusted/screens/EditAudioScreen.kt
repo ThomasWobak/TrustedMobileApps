@@ -1,15 +1,15 @@
 package com.example.mobileappstrusted.screens
 
+import android.content.ContentValues
 import android.media.MediaPlayer
+import android.os.Environment
+import android.provider.MediaStore
+import android.widget.Toast
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import android.content.ContentValues
-import android.provider.MediaStore
-import android.os.Environment
-import android.widget.Toast
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -340,7 +340,7 @@ fun EditAudioScreen(filePath: String) {
                                         .addAllEntries(editHistoryEntries)
                                         .build()
 
-                                    writeBlocksWithMetadata(outStream, header, blocks, merkleRoot, editHistory)
+                                    writeBlocksWithMetadata(outStream, blocks, merkleRoot, editHistory)
 
                                     Toast.makeText(context, "Audio exported to Music/$fileName", Toast.LENGTH_LONG).show()
                                 }

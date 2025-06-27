@@ -39,6 +39,8 @@ object MerkleHasher {
             }
         }
 
+        Log.i("AudioDebug", "Building merkle root: $currentLevel")
+
         return currentLevel.first()
     }
 
@@ -73,10 +75,13 @@ object MerkleHasher {
 
         val (_, blocks) = WavUtils.splitWavIntoBlocks(file)
         val sortedBlocks = blocks
-            .map { it.toBuilder().setCurrentIndex(it.originalIndex).build() }
-            .sortedBy { it.currentIndex }
-
+            .sortedBy { it.originalIndex }
+        sortedBlocks.forEachIndexed { index, block ->
+            val pcmData = block.pcmData.toByteArray()
+            Log.i("AudioDebug", "Block ${block.originalIndex},${block.currentIndex}, $index  pcmData (${pcmData.size} bytes): ${pcmData.joinToString(", ") { it.toString() }}")
+        }
         val recomputedRoot = buildMerkleRoot(sortedBlocks)
+        Log.i("AudioDebug", "Original: $omrhHash, recomputed: $recomputedRoot")
         val matches = omrhHash.contentEquals(recomputedRoot)
 
         if (matches) {
