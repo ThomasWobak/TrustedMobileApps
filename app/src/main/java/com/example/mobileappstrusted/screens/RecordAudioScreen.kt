@@ -162,7 +162,12 @@ fun RecordAudioScreen(onRecordingComplete: (String) -> Unit) {
             Text(statusText, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(bottom = 16.dp))
 
             if (hasStoppedRecording && amplitudes.isNotEmpty()) {
-                WaveformView(amplitudes, onBarClick = { i: Int, i1: Int -> })
+                WaveformView(
+                    amplitudes = amplitudes,
+                    onBarClick = { _, _ -> }, // no interaction
+                    selectedVisualBlockIndex = null, // no highlight
+                    totalBlocks = 1 // avoids divide-by-zero
+                )
                 Spacer(modifier = Modifier.height(16.dp))
             }
 

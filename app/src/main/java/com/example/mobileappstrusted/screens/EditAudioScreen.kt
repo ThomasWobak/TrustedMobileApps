@@ -29,7 +29,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.example.mobileappstrusted.audio.WavUtils.extractAmplitudesFromWav
@@ -64,6 +66,7 @@ fun EditAudioScreen(filePath: String) {
 
 
 
+
     val currentFilePath by remember { mutableStateOf(filePath) }
     var amplitudes by remember { mutableStateOf<List<Int>>(emptyList()) }
     val mediaPlayer = remember { MediaPlayer() }
@@ -87,6 +90,14 @@ fun EditAudioScreen(filePath: String) {
     var wavHeader by remember { mutableStateOf<ByteArray?>(null) }
     var blocks by remember { mutableStateOf<List<WavBlockProtos.WavBlock>>(emptyList()) }
     var playbackFile by remember { mutableStateOf<File?>(null) }
+
+    //highlight selected Block
+    var selectedBlockIndex by remember { mutableStateOf<Int?>(null) }
+    val visibleBlocks = remember(blocks, deletedBlockIndices) {
+        blocks
+            .filterNot { deletedBlockIndices.contains(it.originalIndex) }
+            .sortedBy { it.currentIndex }
+    }
 
     // 1) load amplitudes + initial mediaPlayer when path changes
     LaunchedEffect(currentFilePath) {
@@ -166,18 +177,36 @@ fun EditAudioScreen(filePath: String) {
         }
         Spacer(Modifier.height(24.dp))
 
-        // waveform
-        if (amplitudes.isNotEmpty()) WaveformView(amplitudes) { barIndex, amplitudeIndex ->
-            val visibleBlocks = blocks
-                .filterNot { deletedBlockIndices.contains(it.originalIndex) }
-                .sortedBy { it.currentIndex }
 
-            val blockIndex = (amplitudeIndex.toFloat() / amplitudes.size * visibleBlocks.size).toInt()
-            if (blockIndex in visibleBlocks.indices) {
-                val originalIndex = visibleBlocks[blockIndex].originalIndex
-                removeBlockText = originalIndex.toString()
+        val barWidthPx = with(LocalDensity.current) { 2.dp.toPx() }
+        val spacePx = with(LocalDensity.current) { 1.dp.toPx() }
+        val canvasWidth = LocalConfiguration.current.screenWidthDp.dp
+        val canvasWidthPx = with(LocalDensity.current) { canvasWidth.toPx() }
+
+        val totalBars = (canvasWidthPx / (barWidthPx + spacePx)).toInt().coerceAtLeast(1)
+
+        // waveform
+        if (amplitudes.isNotEmpty()) WaveformView(
+            amplitudes = amplitudes,
+            selectedVisualBlockIndex = selectedBlockIndex,
+            totalBlocks = visibleBlocks.size,
+            onBarClick = { barIndex, _ ->
+                val barsPerBlock = totalBars.toFloat() / visibleBlocks.size.coerceAtLeast(1)
+                val blockIndex = (barIndex / barsPerBlock).toInt()
+
+                //Updated the RemoveBlock TextField with the selected value
+                if (blockIndex in visibleBlocks.indices) {
+                    val selected = visibleBlocks[blockIndex]
+                    // Use the block’s *visual index* for highlighting (position in visibleBlocks)
+                    selectedBlockIndex = blockIndex
+                    // But use the actual block's currentIndex for deletion
+                    removeBlockText = selected.currentIndex.toString()
+                }
             }
-        }
+        )
+
+
+
 
         else if (isWav) Text("Loading waveform…", style = MaterialTheme.typography.bodyMedium)
         else Text("Cannot display waveform for non-WAV file.", style = MaterialTheme.typography.bodyMedium)
