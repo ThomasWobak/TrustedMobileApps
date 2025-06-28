@@ -4,13 +4,15 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.provider.Settings.Secure.ANDROID_ID
 import android.provider.Settings.Secure.getString
-import android.util.Log
+import com.example.mobileappstrusted.audio.InputStreamReader.chunkRawPcm
+import com.example.mobileappstrusted.audio.OutputStreamWriter.writeEditHistoryChunkToStream
+import com.example.mobileappstrusted.audio.OutputStreamWriter.writeMerkleRootChunkToStream
+import com.example.mobileappstrusted.audio.OutputStreamWriter.writeWavBlocksToStream
+import com.example.mobileappstrusted.audio.OutputStreamWriter.writeWavHeaderToStream
 import com.example.mobileappstrusted.cryptography.MerkleHasher
-import com.example.mobileappstrusted.cryptography.ORIGINAL_MERKLE_ROOT_HASH_CHUNK_IDENTIFIER
 import com.example.mobileappstrusted.protobuf.EditHistoryProto
 import com.example.mobileappstrusted.protobuf.WavBlockProtos
 import com.google.protobuf.CodedOutputStream
-import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.OutputStream
 import java.nio.ByteBuffer
@@ -18,9 +20,6 @@ import java.nio.ByteOrder
 import kotlin.math.abs
 
 object WavUtils {
-
-    private const val BLOCK_SIZE = 100 * 1024  // 100 KB per block, roughly 1.16 seconds
-
 
     fun extractAmplitudesFromWav(file: File, sampleEvery: Int = 200): List<Int> {
         val bytes = file.readBytes()
@@ -37,102 +36,6 @@ object WavUtils {
         return amplitudes
     }
 
-    fun splitWavIntoBlocks(file: File): Pair<ByteArray, List<WavBlockProtos.WavBlock>> {
-        return splitWavIntoBlocks(file.readBytes())
-    }
-
-    fun splitWavIntoBlocks(bytes: ByteArray): Pair<ByteArray, List<WavBlockProtos.WavBlock>> {
-        require(bytes.size >= 44)
-        val header = bytes.copyOfRange(0, 44)
-        val (dataStart, dataSize) = findDataChunk(bytes)
-
-        if (dataStart + dataSize > bytes.size) {
-            throw IllegalStateException("Data chunk size exceeds file length.")
-        }
-
-        val data = bytes.copyOfRange(dataStart, dataStart + dataSize)
-        val blocks = chunkRawPcm(data)
-
-        return header to blocks
-    }
-    fun chunkRawPcm(data: ByteArray): List<WavBlockProtos.WavBlock> {
-        val blocks = mutableListOf<WavBlockProtos.WavBlock>()
-        Log.d("AudioDebug", "Data Size: ${data.size}")
-
-        // Try parsing using parseDelimitedFrom with ByteArrayInputStream
-        try {
-            val inputStream = ByteArrayInputStream(data)
-            while (true) {
-                val block = WavBlockProtos.WavBlock.parseDelimitedFrom(inputStream)
-                    ?: break  // End of stream
-
-                if (block.pcmData.isEmpty) {
-                    Log.d("AudioDebug", "Empty PCM data found, treating as invalid.")
-                    throw IllegalArgumentException("Empty block encountered")
-                }
-
-                blocks.add(block)
-                Log.d("AudioDebug", "Parsed delimited block, PCM size: ${block.pcmData.size()}")
-            }
-
-            return blocks
-        } catch (e: Exception) {
-            Log.d("AudioDebug", "Delimited parsing failed, falling back to raw PCM: ${e.message}")
-        }
-
-        // Fallback: treat as raw PCM
-        Log.d("AudioDebug", "Falling back to raw PCM mode")
-        var offset = 0
-        var index = 0
-        while (offset < data.size) {
-            val end = minOf(offset + BLOCK_SIZE, data.size)
-            val chunkBytes = data.copyOfRange(offset, end)
-
-            val block = WavBlockProtos.WavBlock.newBuilder()
-                .setOriginalIndex(index)
-                .setCurrentIndex(index)
-                .setIsDeleted(false)
-                .setUndeletedHash(com.google.protobuf.ByteString.EMPTY)
-                .setPcmData(com.google.protobuf.ByteString.copyFrom(chunkBytes))
-                .build()
-
-            blocks.add(block)
-            offset = end
-            index++
-        }
-
-        return blocks
-    }
-
-
-
-
-
-    fun findDataChunk(bytes: ByteArray): Pair<Int, Int> {
-        var offset = 12 // skip RIFF header
-
-        while (offset + 8 <= bytes.size) {
-            val id = String(bytes, offset, 4, Charsets.US_ASCII)
-            val size = ByteBuffer.wrap(bytes, offset + 4, 4)
-                .order(ByteOrder.LITTLE_ENDIAN)
-                .int
-
-            val chunkDataStart = offset + 8
-            val chunkDataEnd = chunkDataStart + size
-
-            if (chunkDataEnd > bytes.size) {
-                throw IllegalStateException("Chunk $id size exceeds file length.")
-            }
-
-            if (id == "data") {
-                return chunkDataStart to size
-            }
-
-            offset += 8 + size
-        }
-
-        throw IllegalStateException("Could not find 'data' chunk.")
-    }
 
 
     fun writeBlocksToTempFile(
@@ -160,24 +63,24 @@ object WavUtils {
     }
 
     fun writeWavFile(pcmData: ByteArray, outputFile: File) {
-        val merkleRoot = MerkleHasher.buildMerkleRoot(chunkRawPcm(pcmData))
-        val merkleChunkSize = merkleRoot.size
-        val audioDataSize = pcmData.size
+        val blocks = chunkRawPcm(pcmData)
+        val merkleRoot = MerkleHasher.buildMerkleRoot(blocks)
 
-        val header = generateWavHeader(pcmDataSize = audioDataSize, merkleChunkSize = merkleChunkSize, 0)
+        val dataBlocksSize = blocks.sumOf { block ->
+            val blockBytes = block.toByteArray()
+            val prefixSize = CodedOutputStream.computeUInt32SizeNoTag(blockBytes.size)
+            prefixSize + blockBytes.size
+        }
 
-        outputFile.outputStream().use { out ->
-            out.write(header)
-            out.write(pcmData)
 
-            // Write "omrh" chunk
-            val chunkId = ORIGINAL_MERKLE_ROOT_HASH_CHUNK_IDENTIFIER.toByteArray(Charsets.US_ASCII)
-            val chunkSizeBytes = ByteBuffer.allocate(4)
-                .order(ByteOrder.LITTLE_ENDIAN).putInt(merkleChunkSize).array()
+        outputFile.outputStream().use { outputStream ->
+            writeWavHeaderToStream( pcmDataSize = dataBlocksSize,
+                merkleChunkSize = merkleRoot.size,
+                editHistorySize = 0,
+                outputStream)
 
-            out.write(chunkId)
-            out.write(chunkSizeBytes)
-            out.write(merkleRoot)
+            writeWavBlocksToStream(outputStream, blocks)
+            writeMerkleRootChunkToStream(outputStream, merkleRoot)
         }
     }
 
@@ -206,7 +109,6 @@ object WavUtils {
         merkleRoot: ByteArray,
         editHistory: EditHistoryProto.EditHistory
     ) {
-
         val dataBlocksSize = blocks.sumOf { block ->
             val blockBytes = block.toByteArray()
             val prefixSize = CodedOutputStream.computeUInt32SizeNoTag(blockBytes.size)
@@ -215,95 +117,19 @@ object WavUtils {
 
         val editHistorySize = editHistory.toByteArray().size
 
-        val header = generateWavHeader(
-            pcmDataSize = dataBlocksSize,
+
+        writeWavHeaderToStream( pcmDataSize = dataBlocksSize,
             merkleChunkSize = merkleRoot.size,
-            editHistorySize = editHistorySize
-        )
+            editHistorySize = editHistorySize,
+            outputStream)
 
-        // Write original WAV header
-        outputStream.write(header)
-
-        // Write audio blocks
-        blocks.forEach { block ->
-            block.writeDelimitedTo(outputStream)
-            Log.d("AudioDebug", "Wrote Block")
-        }
-
-
-        // Write custom chunk with Merkle root ("omrh")
-        val chunkId = "omrh".toByteArray(Charsets.US_ASCII)
-        val chunkSize = merkleRoot.size
-        val sizeBytes = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(chunkSize).array()
-
-        outputStream.write(chunkId)
-        outputStream.write(sizeBytes)
-        outputStream.write(merkleRoot)
-
-        // NEW: Write edit history chunk ("edhi")
-        val historyBytes = editHistory.toByteArray()
-        val historyChunkId = "edhi".toByteArray(Charsets.US_ASCII)
-        val historySizeBytes = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(historyBytes.size).array()
-
-        outputStream.write(historyChunkId)
-        outputStream.write(historySizeBytes)
-        outputStream.write(historyBytes)
+        writeWavBlocksToStream(outputStream, blocks)
+        writeMerkleRootChunkToStream(outputStream, merkleRoot)
+        writeEditHistoryChunkToStream(outputStream, editHistory)
     }
 
-    fun generateWavHeader(pcmDataSize: Int, merkleChunkSize: Int, editHistorySize: Int): ByteArray {
-        val sampleRate = 44100
-        val channels = 1
-        val bitDepth = 16
-        val byteRate = sampleRate * channels * bitDepth / 8
 
-        val chunkFmtSize = 16
-        val chunkFmtHeader = 8
-        val chunkDataHeader = 8
-        val chunkOmrhHeader = 8
-        val chunkEdhiHeader = 8
-        val riffHeader = 4
 
-        val riffSize = riffHeader +
-                chunkFmtHeader + chunkFmtSize +
-                chunkDataHeader + pcmDataSize +
-                chunkOmrhHeader + merkleChunkSize +
-                chunkEdhiHeader + editHistorySize
-
-        val header = ByteArray(44)
-
-        // RIFF header
-        header[0] = 'R'.code.toByte()
-        header[1] = 'I'.code.toByte()
-        header[2] = 'F'.code.toByte()
-        header[3] = 'F'.code.toByte()
-        writeInt(header, 4, riffSize - 8)
-        header[8] = 'W'.code.toByte()
-        header[9] = 'A'.code.toByte()
-        header[10] = 'V'.code.toByte()
-        header[11] = 'E'.code.toByte()
-
-        // fmt chunk
-        header[12] = 'f'.code.toByte()
-        header[13] = 'm'.code.toByte()
-        header[14] = 't'.code.toByte()
-        header[15] = ' '.code.toByte()
-        writeInt(header, 16, 16)
-        writeShort(header, 20, 1)
-        writeShort(header, 22, channels.toShort())
-        writeInt(header, 24, sampleRate)
-        writeInt(header, 28, byteRate)
-        writeShort(header, 32, (channels * bitDepth / 8).toShort())
-        writeShort(header, 34, bitDepth.toShort())
-
-        // data chunk
-        header[36] = 'd'.code.toByte()
-        header[37] = 'a'.code.toByte()
-        header[38] = 't'.code.toByte()
-        header[39] = 'a'.code.toByte()
-        writeInt(header, 40, pcmDataSize)
-
-        return header
-    }
 
 
     @SuppressLint("HardwareIds")

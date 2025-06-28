@@ -1,11 +1,10 @@
 package com.example.mobileappstrusted.cryptography
 
 import android.util.Log
-import com.example.mobileappstrusted.audio.WavUtils
+import com.example.mobileappstrusted.audio.InputStreamReader.extractMerkleRootFromWav
+import com.example.mobileappstrusted.audio.InputStreamReader.splitWavIntoBlocks
 import com.example.mobileappstrusted.protobuf.WavBlockProtos
 import java.io.File
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import java.security.MessageDigest
 
 const val ORIGINAL_MERKLE_ROOT_HASH_CHUNK_IDENTIFIER = "omrh"
@@ -44,26 +43,6 @@ object MerkleHasher {
         return currentLevel.first()
     }
 
-
-    private fun extractMerkleRootFromWav(file: File): ByteArray? {
-        val bytes = file.readBytes()
-        var offset = 12
-
-        while (offset + 8 <= bytes.size) {
-            val chunkId = String(bytes, offset, 4, Charsets.US_ASCII)
-            val chunkSize = ByteBuffer.wrap(bytes, offset + 4, 4)
-                .order(ByteOrder.LITTLE_ENDIAN).int
-
-            if (chunkId == ORIGINAL_MERKLE_ROOT_HASH_CHUNK_IDENTIFIER) {
-                return bytes.sliceArray(offset + 8 until offset + 8 + chunkSize)
-            }
-
-            offset += 8 + chunkSize
-        }
-
-        return null
-    }
-
     fun verifyWavMerkleRoot(file: File): Boolean {
         if (!file.exists() || file.length() <= 44) return false
 
@@ -73,7 +52,7 @@ object MerkleHasher {
             return false
         }
 
-        val (_, blocks) = WavUtils.splitWavIntoBlocks(file)
+        val (_, blocks) = splitWavIntoBlocks(file)
         val sortedBlocks = blocks
             .sortedBy { it.originalIndex }
         sortedBlocks.forEachIndexed { index, block ->
@@ -82,7 +61,7 @@ object MerkleHasher {
         }
         val recomputedRoot = buildMerkleRoot(sortedBlocks)
         Log.i("AudioDebug", "Original: $omrhHash, recomputed: $recomputedRoot")
-        val matches = omrhHash.contentEquals(recomputedRoot)
+        val matches = omrhHash.originalRootHash.toByteArray().contentEquals(recomputedRoot)
 
         if (matches) {
             Log.i("AudioDebug", "✅ Merkle root matches.")
