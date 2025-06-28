@@ -167,7 +167,18 @@ fun EditAudioScreen(filePath: String) {
         Spacer(Modifier.height(24.dp))
 
         // waveform
-        if (amplitudes.isNotEmpty()) WaveformView(amplitudes)
+        if (amplitudes.isNotEmpty()) WaveformView(amplitudes) { barIndex, amplitudeIndex ->
+            val visibleBlocks = blocks
+                .filterNot { deletedBlockIndices.contains(it.originalIndex) }
+                .sortedBy { it.currentIndex }
+
+            val blockIndex = (amplitudeIndex.toFloat() / amplitudes.size * visibleBlocks.size).toInt()
+            if (blockIndex in visibleBlocks.indices) {
+                val originalIndex = visibleBlocks[blockIndex].originalIndex
+                removeBlockText = originalIndex.toString()
+            }
+        }
+
         else if (isWav) Text("Loading waveform…", style = MaterialTheme.typography.bodyMedium)
         else Text("Cannot display waveform for non-WAV file.", style = MaterialTheme.typography.bodyMedium)
         Spacer(Modifier.height(24.dp))
