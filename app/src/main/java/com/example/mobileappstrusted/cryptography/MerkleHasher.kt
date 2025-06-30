@@ -1,6 +1,7 @@
 package com.example.mobileappstrusted.cryptography
 
 import android.util.Log
+import com.example.mobileappstrusted.audio.InputStreamReader.debugPrintAllChunkHeaders
 import com.example.mobileappstrusted.audio.InputStreamReader.extractMerkleRootFromWav
 import com.example.mobileappstrusted.audio.InputStreamReader.splitWavIntoBlocks
 import com.example.mobileappstrusted.protobuf.WavBlockProtos
@@ -22,7 +23,10 @@ object MerkleHasher {
     }
 
     fun buildMerkleRoot(blocks: List<WavBlockProtos.WavBlock>): ByteArray {
-        var currentLevel = blocks.map {
+        val sortedBlocks = blocks
+            .sortedBy { it.originalIndex }
+
+        var currentLevel = sortedBlocks.map {
             if (it.isDeleted && it.undeletedHash != null) {
                 it.undeletedHash.toByteArray()
             } else {
@@ -46,6 +50,7 @@ object MerkleHasher {
     fun verifyWavMerkleRoot(file: File): Boolean {
         if (!file.exists() || file.length() <= 44) return false
 
+        debugPrintAllChunkHeaders(file)
         val omrhHash = extractMerkleRootFromWav(file)
         if (omrhHash == null) {
             Log.w("AudioDebug", "No 'omrh' chunk found.")
@@ -60,7 +65,8 @@ object MerkleHasher {
             Log.i("AudioDebug", "Block ${block.originalIndex},${block.currentIndex}, $index  pcmData (${pcmData.size} bytes): ${pcmData.joinToString(", ") { it.toString() }}")
         }
         val recomputedRoot = buildMerkleRoot(sortedBlocks)
-        Log.i("AudioDebug", "Original: $omrhHash, recomputed: $recomputedRoot")
+        Log.i("AudioDebug", "Original: ${omrhHash.originalRootHash.toByteArray().toHexString()}, recomputed: ${recomputedRoot.toHexString()}")
+
         val matches = omrhHash.originalRootHash.toByteArray().contentEquals(recomputedRoot)
 
         if (matches) {
@@ -71,4 +77,8 @@ object MerkleHasher {
 
         return matches
     }
+
+    private fun ByteArray.toHexString(): String =
+        joinToString(" ") { "%02x".format(it) }
+
 }

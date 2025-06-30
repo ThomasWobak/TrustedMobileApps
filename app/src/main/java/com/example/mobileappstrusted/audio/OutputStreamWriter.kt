@@ -1,9 +1,12 @@
 package com.example.mobileappstrusted.audio
 
 import android.util.Log
+import com.example.mobileappstrusted.cryptography.ORIGINAL_MERKLE_ROOT_HASH_CHUNK_IDENTIFIER
 import com.example.mobileappstrusted.protobuf.EditHistoryProto
 import com.example.mobileappstrusted.protobuf.OmrhBlockProtos
 import com.example.mobileappstrusted.protobuf.WavBlockProtos
+import com.google.protobuf.ByteString
+import java.io.ByteArrayOutputStream
 import java.io.OutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -25,21 +28,26 @@ object OutputStreamWriter {
         merkleRoot: ByteArray
     ) {
         val block = OmrhBlockProtos.OmrhBlock.newBuilder()
-            .setOriginalRootHash(com.google.protobuf.ByteString.copyFrom(merkleRoot))
+            .setOriginalRootHash(ByteString.copyFrom(merkleRoot))
             .build()
 
-        val chunkId = "omrh".toByteArray(Charsets.US_ASCII)
-        val blockSizeStream = java.io.ByteArrayOutputStream()
-        block.writeDelimitedTo(blockSizeStream)
-        val blockBytes = blockSizeStream.toByteArray()
+        val chunkId = ORIGINAL_MERKLE_ROOT_HASH_CHUNK_IDENTIFIER.toByteArray(Charsets.US_ASCII)
+
+        // Temporarily serialize the delimited block to count real length
+        val tempStream = ByteArrayOutputStream()
+        block.writeDelimitedTo(tempStream)
+        val blockBytes = tempStream.toByteArray()
 
         val chunkSizeBytes = ByteBuffer.allocate(4)
-            .order(ByteOrder.LITTLE_ENDIAN).putInt(blockBytes.size).array()
+            .order(ByteOrder.LITTLE_ENDIAN)
+            .putInt(blockBytes.size)  // Only the actual bytes, not Protobuf internal size prefix logic
+            .array()
 
         outputStream.write(chunkId)
         outputStream.write(chunkSizeBytes)
         outputStream.write(blockBytes)
     }
+
 
 
     fun writeEditHistoryChunkToStream(

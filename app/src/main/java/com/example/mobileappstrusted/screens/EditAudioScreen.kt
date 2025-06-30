@@ -32,13 +32,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.example.mobileappstrusted.audio.InputStreamReader.splitWavIntoBlocks
 import com.example.mobileappstrusted.audio.WavUtils.extractAmplitudesFromWav
 import com.example.mobileappstrusted.audio.WavUtils.extractEditHistoryFromWav
 import com.example.mobileappstrusted.audio.WavUtils.getDeviceId
 import com.example.mobileappstrusted.audio.WavUtils.getDeviceName
-import com.example.mobileappstrusted.audio.WavUtils.splitWavIntoBlocks
 import com.example.mobileappstrusted.audio.WavUtils.writeBlocksToTempFile
-import com.example.mobileappstrusted.audio.WavUtils.writeBlocksWithMetadata
+import com.example.mobileappstrusted.audio.WavUtils.writeWavFileToPersistentStorage
 import com.example.mobileappstrusted.components.NoPathGivenScreen
 import com.example.mobileappstrusted.components.WaveformView
 import com.example.mobileappstrusted.cryptography.MerkleHasher
@@ -340,7 +340,7 @@ fun EditAudioScreen(filePath: String) {
                                         .addAllEntries(editHistoryEntries)
                                         .build()
 
-                                    writeBlocksWithMetadata(outStream, blocks, merkleRoot, editHistory)
+                                    writeWavFileToPersistentStorage(outStream, blocks, merkleRoot, editHistory)
 
                                     Toast.makeText(context, "Audio exported to Music/$fileName", Toast.LENGTH_LONG).show()
                                 }

@@ -72,10 +72,9 @@ object WavUtils {
             prefixSize + blockBytes.size
         }
 
-
         outputFile.outputStream().use { outputStream ->
             writeWavHeaderToStream( pcmDataSize = dataBlocksSize,
-                merkleChunkSize = merkleRoot.size,
+                merkleChunkSize = 35,
                 editHistorySize = 0,
                 outputStream)
 
@@ -103,7 +102,7 @@ object WavUtils {
         b[offset + 1] = ((value.toInt() shr 8) and 0xff).toByte()
     }
 
-    fun writeBlocksWithMetadata(
+    fun writeWavFileToPersistentStorage(
         outputStream: OutputStream,
         blocks: List<WavBlockProtos.WavBlock>,
         merkleRoot: ByteArray,
@@ -119,7 +118,7 @@ object WavUtils {
 
 
         writeWavHeaderToStream( pcmDataSize = dataBlocksSize,
-            merkleChunkSize = merkleRoot.size,
+            merkleChunkSize = 35,
             editHistorySize = editHistorySize,
             outputStream)
 

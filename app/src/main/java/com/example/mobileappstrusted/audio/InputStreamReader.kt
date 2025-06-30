@@ -6,6 +6,7 @@ import com.example.mobileappstrusted.protobuf.OmrhBlockProtos
 import com.example.mobileappstrusted.protobuf.WavBlockProtos
 import java.io.ByteArrayInputStream
 import java.io.File
+import java.io.InputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
@@ -81,32 +82,70 @@ object InputStreamReader {
 
 
     fun extractMerkleRootFromWav(file: File): OmrhBlockProtos.OmrhBlock? {
+        val input = file.inputStream().buffered()
+        input.skip(12) // Skip RIFF header
+
+        val targetIdBytes = ORIGINAL_MERKLE_ROOT_HASH_CHUNK_IDENTIFIER.toByteArray(Charsets.US_ASCII)
+
+        while (true) {
+            val idBytes = ByteArray(4)
+            val sizeBytes = ByteArray(4)
+
+            if (input.read(idBytes) != 4 || input.read(sizeBytes) != 4) break
+
+            val chunkSize = ByteBuffer.wrap(sizeBytes).order(ByteOrder.LITTLE_ENDIAN).int
+
+            if (idBytes.contentEquals(targetIdBytes)) {
+                return try {
+                    OmrhBlockProtos.OmrhBlock.parseDelimitedFrom(input)
+                } catch (e: Exception) {
+                    Log.w("AudioDebug", "omrh block invalid: ${e.message}")
+                    null
+                }
+            } else {
+                try {
+                    skipFully(input, chunkSize.toLong())
+                } catch (e: Exception) {
+                    Log.w("AudioDebug", "Failed to skip chunk: ${e.message}")
+                    break
+                }
+            }
+        }
+
+        Log.w("AudioDebug", "No 'omrh' block found.")
+        return null
+    }
+
+    private fun skipFully(input: InputStream, bytesToSkip: Long) {
+        var remaining = bytesToSkip
+        while (remaining > 0) {
+            val skipped = input.skip(remaining)
+            if (skipped <= 0) throw java.io.EOFException("Unable to skip $remaining more bytes")
+            remaining -= skipped
+        }
+    }
+
+
+    fun debugPrintAllChunkHeaders(file: File) {
+        val input = file.inputStream().buffered()
+        input.skip(12) // Skip RIFF header
+
+        var offset = 12
         val bytes = file.readBytes()
-        var offset = 12 // Skip RIFF header
 
         while (offset + 8 <= bytes.size) {
-            val chunkId = String(bytes, offset, 4, Charsets.US_ASCII)
+            val chunkId = bytes.copyOfRange(offset, offset + 4)
+                .toString(Charsets.US_ASCII)
             val chunkSize = ByteBuffer.wrap(bytes, offset + 4, 4)
                 .order(ByteOrder.LITTLE_ENDIAN).int
 
-            if (chunkId == ORIGINAL_MERKLE_ROOT_HASH_CHUNK_IDENTIFIER) {
-                val chunkStart = offset + 8
-                val chunkEnd = chunkStart + chunkSize
-                if (chunkEnd > bytes.size) return null
-
-                val chunkData = bytes.copyOfRange(chunkStart, chunkEnd)
-                return try {
-                    OmrhBlockProtos.OmrhBlock.parseDelimitedFrom(chunkData.inputStream())
-                } catch (e: Exception) {
-                    null
-                }
-            }
+            Log.d("AudioDebug", "Chunk found at offset $offset: ID='$chunkId' size=$chunkSize")
 
             offset += 8 + chunkSize
         }
-
-        return null
     }
+
+
 
 
     fun findDataChunk(bytes: ByteArray): Pair<Int, Int> {
