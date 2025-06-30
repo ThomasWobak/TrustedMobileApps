@@ -1,7 +1,6 @@
 package com.example.mobileappstrusted.cryptography
 
 import android.util.Log
-import com.example.mobileappstrusted.audio.InputStreamReader.debugPrintAllChunkHeaders
 import com.example.mobileappstrusted.audio.InputStreamReader.extractMerkleRootFromWav
 import com.example.mobileappstrusted.audio.InputStreamReader.splitWavIntoBlocks
 import com.example.mobileappstrusted.protobuf.WavBlockProtos
@@ -50,7 +49,6 @@ object MerkleHasher {
     fun verifyWavMerkleRoot(file: File): Boolean {
         if (!file.exists() || file.length() <= 44) return false
 
-        debugPrintAllChunkHeaders(file)
         val omrhHash = extractMerkleRootFromWav(file)
         if (omrhHash == null) {
             Log.w("AudioDebug", "No 'omrh' chunk found.")
@@ -60,10 +58,12 @@ object MerkleHasher {
         val (_, blocks) = splitWavIntoBlocks(file)
         val sortedBlocks = blocks
             .sortedBy { it.originalIndex }
+
+        /*
         sortedBlocks.forEachIndexed { index, block ->
             val pcmData = block.pcmData.toByteArray()
             Log.i("AudioDebug", "Block ${block.originalIndex},${block.currentIndex}, $index  pcmData (${pcmData.size} bytes): ${pcmData.joinToString(", ") { it.toString() }}")
-        }
+        } */
         val recomputedRoot = buildMerkleRoot(sortedBlocks)
         Log.i("AudioDebug", "Original: ${omrhHash.originalRootHash.toByteArray().toHexString()}, recomputed: ${recomputedRoot.toHexString()}")
 
