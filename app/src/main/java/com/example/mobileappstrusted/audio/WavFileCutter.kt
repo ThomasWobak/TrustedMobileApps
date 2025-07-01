@@ -2,6 +2,7 @@ package com.example.mobileappstrusted.audio
 
 import android.content.Context
 import android.util.Log
+import com.example.mobileappstrusted.audio.InputStreamReader.splitWavIntoBlocks
 import com.example.mobileappstrusted.cryptography.MerkleHasher
 import java.io.File
 
@@ -10,7 +11,7 @@ object WavCutter {
     fun markBlockDeleted(context: Context,inputPath: String, blockIndex: Int): File? {
         val inputFile = File(inputPath)
         return try {
-            val (header, blocks) = WavUtils.splitWavIntoBlocks(inputFile)
+            val (header, blocks) = splitWavIntoBlocks(inputFile)
 
             if (blockIndex !in blocks.indices) return inputFile
 

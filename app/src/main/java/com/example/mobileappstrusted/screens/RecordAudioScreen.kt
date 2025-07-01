@@ -133,6 +133,13 @@ fun RecordAudioScreen(onRecordingComplete: (String) -> Unit) {
     }
 
 
+            val wavBytes = audioData.toByteArray()
+            writeWavFile(wavBytes, outputFile)
+            finishedFilePath = outputFile.absolutePath
+        }
+        thread.start()
+        recordingThread = thread
+    }
 
     LaunchedEffect(shouldClearState) {
         if (shouldClearState) {
