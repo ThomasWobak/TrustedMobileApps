@@ -1,0 +1,8 @@
+syntax = "proto3";
+
+option java_package = "com.example.mobileappstrusted.protobuf";
+option java_outer_classname = "OmrhBlockProtos"; //
+
+message OmrhBlock {
+    bytes original_root_hash = 1;
+}

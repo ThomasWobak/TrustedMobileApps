@@ -1,11 +1,10 @@
 package com.example.mobileappstrusted.cryptography
 
 import android.util.Log
-import com.example.mobileappstrusted.audio.WavUtils
+import com.example.mobileappstrusted.audio.InputStreamReader.extractMerkleRootFromWav
+import com.example.mobileappstrusted.audio.InputStreamReader.splitWavIntoBlocks
 import com.example.mobileappstrusted.protobuf.WavBlockProtos
 import java.io.File
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import java.security.MessageDigest
 
 const val ORIGINAL_MERKLE_ROOT_HASH_CHUNK_IDENTIFIER = "omrh"
@@ -23,7 +22,10 @@ object MerkleHasher {
     }
 
     fun buildMerkleRoot(blocks: List<WavBlockProtos.WavBlock>): ByteArray {
-        var currentLevel = blocks.map {
+        val sortedBlocks = blocks
+            .sortedBy { it.originalIndex }
+
+        var currentLevel = sortedBlocks.map {
             if (it.isDeleted && it.undeletedHash != null) {
                 it.undeletedHash.toByteArray()
             } else {
@@ -39,27 +41,9 @@ object MerkleHasher {
             }
         }
 
+        Log.i("AudioDebug", "Building merkle root: $currentLevel")
+
         return currentLevel.first()
-    }
-
-
-    private fun extractMerkleRootFromWav(file: File): ByteArray? {
-        val bytes = file.readBytes()
-        var offset = 12
-
-        while (offset + 8 <= bytes.size) {
-            val chunkId = String(bytes, offset, 4, Charsets.US_ASCII)
-            val chunkSize = ByteBuffer.wrap(bytes, offset + 4, 4)
-                .order(ByteOrder.LITTLE_ENDIAN).int
-
-            if (chunkId == ORIGINAL_MERKLE_ROOT_HASH_CHUNK_IDENTIFIER) {
-                return bytes.sliceArray(offset + 8 until offset + 8 + chunkSize)
-            }
-
-            offset += 8 + chunkSize
-        }
-
-        return null
     }
 
     fun verifyWavMerkleRoot(file: File): Boolean {
@@ -71,13 +55,19 @@ object MerkleHasher {
             return false
         }
 
-        val (_, blocks) = WavUtils.splitWavIntoBlocks(file)
+        val (_, blocks) = splitWavIntoBlocks(file)
         val sortedBlocks = blocks
-            .map { it.toBuilder().setCurrentIndex(it.originalIndex).build() }
-            .sortedBy { it.currentIndex }
+            .sortedBy { it.originalIndex }
 
+        /*
+        sortedBlocks.forEachIndexed { index, block ->
+            val pcmData = block.pcmData.toByteArray()
+            Log.i("AudioDebug", "Block ${block.originalIndex},${block.currentIndex}, $index  pcmData (${pcmData.size} bytes): ${pcmData.joinToString(", ") { it.toString() }}")
+        } */
         val recomputedRoot = buildMerkleRoot(sortedBlocks)
-        val matches = omrhHash.contentEquals(recomputedRoot)
+        Log.i("AudioDebug", "Original: ${omrhHash.originalRootHash.toByteArray().toHexString()}, recomputed: ${recomputedRoot.toHexString()}")
+
+        val matches = omrhHash.originalRootHash.toByteArray().contentEquals(recomputedRoot)
 
         if (matches) {
             Log.i("AudioDebug", "✅ Merkle root matches.")
@@ -87,4 +77,8 @@ object MerkleHasher {
 
         return matches
     }
+
+    private fun ByteArray.toHexString(): String =
+        joinToString(" ") { "%02x".format(it) }
+
 }
