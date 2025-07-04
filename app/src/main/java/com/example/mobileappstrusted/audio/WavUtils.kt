@@ -4,10 +4,12 @@ import android.content.Context
 import com.example.mobileappstrusted.audio.InputStreamReader.chunkRawPcm
 import com.example.mobileappstrusted.audio.OutputStreamWriter.writeEditHistoryChunkToStream
 import com.example.mobileappstrusted.audio.OutputStreamWriter.writeMerkleRootChunkToStream
+import com.example.mobileappstrusted.audio.OutputStreamWriter.writeMetaDataChunkToStream
 import com.example.mobileappstrusted.audio.OutputStreamWriter.writeWavBlocksToStream
 import com.example.mobileappstrusted.audio.OutputStreamWriter.writeWavHeaderToStream
 import com.example.mobileappstrusted.cryptography.MerkleHasher
 import com.example.mobileappstrusted.protobuf.EditHistoryProto
+import com.example.mobileappstrusted.protobuf.RecordingMetadataProto
 import com.example.mobileappstrusted.protobuf.WavBlockProtos
 import com.google.protobuf.CodedOutputStream
 import java.io.File
@@ -57,7 +59,7 @@ object WavUtils {
         return outFile
     }
 
-    fun writeWavFile(pcmData: ByteArray, outputFile: File) {
+    fun writeWavFile(pcmData: ByteArray, outputFile: File, metadata: RecordingMetadataProto.RecordingMetadata) {
         val blocks = chunkRawPcm(pcmData)
         val merkleRoot = MerkleHasher.buildMerkleRoot(blocks)
 
@@ -71,10 +73,12 @@ object WavUtils {
             writeWavHeaderToStream( pcmDataSize = dataBlocksSize,
                 merkleChunkSize = 35,
                 editHistorySize = 0,
+                metaDataSize= metadata.toByteArray().size,
                 outputStream)
 
             writeWavBlocksToStream(outputStream, blocks)
             writeMerkleRootChunkToStream(outputStream, merkleRoot)
+            writeMetaDataChunkToStream(outputStream, metadata)
         }
     }
 
@@ -101,7 +105,8 @@ object WavUtils {
         outputStream: OutputStream,
         blocks: List<WavBlockProtos.WavBlock>,
         merkleRoot: ByteArray,
-        editHistory: EditHistoryProto.EditHistory
+        editHistory: EditHistoryProto.EditHistory,
+        metaData: RecordingMetadataProto.RecordingMetadata
     ) {
         val dataBlocksSize = blocks.sumOf { block ->
             val blockBytes = block.toByteArray()
@@ -110,19 +115,43 @@ object WavUtils {
         }
 
         val editHistorySize = editHistory.toByteArray().size
-
+        val metaDataSize= metaData.toByteArray().size
 
         writeWavHeaderToStream( pcmDataSize = dataBlocksSize,
             merkleChunkSize = 35,
             editHistorySize = editHistorySize,
+            metaDataSize= metaDataSize,
             outputStream)
 
         writeWavBlocksToStream(outputStream, blocks)
         writeMerkleRootChunkToStream(outputStream, merkleRoot)
         writeEditHistoryChunkToStream(outputStream, editHistory)
+        writeMetaDataChunkToStream(outputStream, metaData)
+
         // Write audio blocks
         blocks.sortedBy { it.currentIndex }.forEach { block ->
             outputStream.write(block.toByteArray())
+        }
+    }
+    fun writeWavToTemporaryStorage(pcmData: ByteArray, outputFile: File) {
+        val blocks = chunkRawPcm(pcmData)
+        val merkleRoot = MerkleHasher.buildMerkleRoot(blocks)
+
+        val dataBlocksSize = blocks.sumOf { block ->
+            val blockBytes = block.toByteArray()
+            val prefixSize = CodedOutputStream.computeUInt32SizeNoTag(blockBytes.size)
+            prefixSize + blockBytes.size
+        }
+
+        outputFile.outputStream().use { outputStream ->
+            writeWavHeaderToStream( pcmDataSize = dataBlocksSize,
+                merkleChunkSize = 35,
+                editHistorySize = 0,
+                metaDataSize = 0,
+                outputStream)
+
+            writeWavBlocksToStream(outputStream, blocks)
+            writeMerkleRootChunkToStream(outputStream, merkleRoot)
         }
     }
 }

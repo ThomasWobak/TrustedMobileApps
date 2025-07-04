@@ -6,6 +6,9 @@ import android.os.Build
 import android.provider.Settings
 import android.provider.Settings.Secure.getString
 import com.example.mobileappstrusted.protobuf.RecordingMetadataProto
+import java.io.File
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
 object MetadataCollector {
 
@@ -43,5 +46,30 @@ object MetadataCollector {
             .setUser(Build.USER ?: "unknown")
             .setType(Build.TYPE ?: "unknown")
             .build()
+    }
+
+    fun extractMetaDataFromWav(file: File): RecordingMetadataProto.RecordingMetadata? {
+        val bytes = file.readBytes()
+        var i = 12 // skip RIFF header
+
+        while (i + 8 < bytes.size) {
+            val chunkId = bytes.copyOfRange(i, i + 4).toString(Charsets.US_ASCII)
+            val chunkSize = ByteBuffer.wrap(bytes, i + 4, 4).order(ByteOrder.LITTLE_ENDIAN).int
+            val chunkStart = i + 8
+            val chunkEnd = chunkStart + chunkSize
+
+            if (chunkId == "meta" && chunkEnd <= bytes.size) {
+                val chunkData = bytes.copyOfRange(chunkStart, chunkEnd)
+                return try {
+                    RecordingMetadataProto.RecordingMetadata.parseFrom(chunkData)
+                } catch (e: Exception) {
+                    null
+                }
+            }
+
+            i += 8 + chunkSize
+        }
+
+        return null
     }
 }

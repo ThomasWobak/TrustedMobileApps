@@ -38,6 +38,7 @@ import com.example.mobileappstrusted.audio.InputStreamReader.splitWavIntoBlocks
 import com.example.mobileappstrusted.audio.WavUtils.extractAmplitudesFromWav
 
 import com.example.mobileappstrusted.audio.EditScriptUtils.extractEditHistoryFromWav
+import com.example.mobileappstrusted.audio.MetadataCollector.extractMetaDataFromWav
 import com.example.mobileappstrusted.audio.EditScriptUtils.getDeviceId
 import com.example.mobileappstrusted.audio.EditScriptUtils.getDeviceName
 import com.example.mobileappstrusted.audio.EditScriptUtils.reverseEdits
@@ -48,6 +49,7 @@ import com.example.mobileappstrusted.components.NoPathGivenScreen
 import com.example.mobileappstrusted.components.WaveformView
 import com.example.mobileappstrusted.cryptography.MerkleHasher
 import com.example.mobileappstrusted.protobuf.EditHistoryProto
+import com.example.mobileappstrusted.protobuf.RecordingMetadataProto
 import com.example.mobileappstrusted.protobuf.WavBlockProtos
 import java.io.File
 import kotlin.math.min
@@ -62,7 +64,9 @@ fun EditAudioScreen(filePath: String) {
 
     //Edit History
     val editHistoryEntries = remember { mutableStateListOf<EditHistoryProto.EditHistoryEntry>() }
-
+    var metaData by remember {
+        mutableStateOf(RecordingMetadataProto.RecordingMetadata.newBuilder().build())
+    }
 
 
 
@@ -110,10 +114,13 @@ fun EditAudioScreen(filePath: String) {
             val visibleBlocks = blks.filterNot { deletedBlockIndices.contains(it.originalIndex) }
             playbackFile = writeBlocksToTempFile(context, hdr, visibleBlocks)
             amplitudes = extractAmplitudesFromWav(playbackFile!!)
-            // NEW: read edit history from file
+
             extractEditHistoryFromWav(f)?.let { history ->
                 editHistoryEntries.clear()
                 editHistoryEntries.addAll(history.entriesList)
+            }
+            extractMetaDataFromWav(f)?.let { metadata ->
+                metaData = metadata
             }
         } else {
             amplitudes = emptyList()
@@ -386,7 +393,9 @@ fun EditAudioScreen(filePath: String) {
                                         .addAllEntries(editHistoryEntries)
                                         .build()
 
-                                    writeWavFileToPersistentStorage(outStream, blocks, merkleRoot, editHistory)
+
+                                    writeWavFileToPersistentStorage(outStream, blocks, merkleRoot, editHistory, metaData)
+
 
                                     Toast.makeText(context, "Audio exported to Music/$fileName", Toast.LENGTH_LONG).show()
                                 }
@@ -451,6 +460,15 @@ fun EditAudioScreen(filePath: String) {
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
+            }
+            if (metaData==null) {
+                Text("No metadata recorded.", style = MaterialTheme.typography.bodyMedium)
+            } else {
+                Text(
+                    "Collected Metadata: ${metaData.toString()}",
+                    style = MaterialTheme.typography.bodySmall
+                )
+
             }
 
         }

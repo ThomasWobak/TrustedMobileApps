@@ -14,6 +14,7 @@ import com.example.mobileappstrusted.audio.InputStreamReader.splitWavIntoBlocks
 import com.example.mobileappstrusted.audio.WavUtils.extractAmplitudesFromWav
 import com.example.mobileappstrusted.audio.WavUtils.writeBlocksToTempFile
 import com.example.mobileappstrusted.audio.WavUtils.writeWavFile
+import com.example.mobileappstrusted.audio.WavUtils.writeWavToTemporaryStorage
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -101,7 +102,9 @@ class RecordingUtils(
         }
 
         val tempWavFile = File.createTempFile("preview", ".wav", context.cacheDir)
-        writeWavFile(pcm, tempWavFile)
+
+
+        writeWavToTemporaryStorage(pcm, tempWavFile)
         updateTempFile(tempWavFile)
         updateAmplitudes(extractAmplitudesFromWav(tempWavFile))
     }
@@ -150,7 +153,9 @@ class RecordingUtils(
             val finalBytes = synchronized(recordedChunks) {
                 recordedChunks.toByteArray()
             }
-            writeWavFile(finalBytes, outputFile)
+            val metadata = MetadataCollector.collectRecordingMetadata(context)
+            Log.i("Recording", metadata.toString())
+            writeWavFile(finalBytes, outputFile, metadata)
             onRecordingComplete(outputFile.absolutePath)
         }
         setShouldClearState(true)
