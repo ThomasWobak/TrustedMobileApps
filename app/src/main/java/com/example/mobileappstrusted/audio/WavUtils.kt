@@ -1,8 +1,6 @@
 package com.example.mobileappstrusted.audio
 
 import android.content.Context
-import android.provider.Settings.Secure.ANDROID_ID
-import android.provider.Settings.Secure.getString
 import com.example.mobileappstrusted.audio.InputStreamReader.chunkRawPcm
 import com.example.mobileappstrusted.audio.OutputStreamWriter.writeEditHistoryChunkToStream
 import com.example.mobileappstrusted.audio.OutputStreamWriter.writeMerkleRootChunkToStream
@@ -14,8 +12,6 @@ import com.example.mobileappstrusted.protobuf.WavBlockProtos
 import com.google.protobuf.CodedOutputStream
 import java.io.File
 import java.io.OutputStream
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import kotlin.math.abs
 
 object WavUtils {
@@ -124,16 +120,9 @@ object WavUtils {
         writeWavBlocksToStream(outputStream, blocks)
         writeMerkleRootChunkToStream(outputStream, merkleRoot)
         writeEditHistoryChunkToStream(outputStream, editHistory)
-    }
         // Write audio blocks
         blocks.sortedBy { it.currentIndex }.forEach { block ->
             outputStream.write(block.toByteArray())
         }
-
-
-
-
-
-
-
+    }
 }

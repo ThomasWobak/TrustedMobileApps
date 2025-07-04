@@ -1,15 +1,10 @@
-// RecordAudioScreenWithImport.kt
 package com.example.mobileappstrusted.screens
-
-
 import android.Manifest
 import android.annotation.SuppressLint
 import android.media.MediaPlayer
 import androidx.compose.runtime.DisposableEffect
-import android.media.AudioFormat
-import android.media.AudioRecord
-import android.media.MediaRecorder
 import android.net.Uri
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -77,26 +72,12 @@ fun RecordAudioScreen(onRecordingComplete: (String) -> Unit) {
         requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
     }
     val sampleRate = 44100
-    val bufferSize = AudioRecord.getMinBufferSize(
-        sampleRate,
-        AudioFormat.CHANNEL_IN_MONO,
-        AudioFormat.ENCODING_PCM_16BIT
-    )
 
 
-    val audioRecord = remember {
-        AudioRecord(
-            MediaRecorder.AudioSource.MIC,
-            sampleRate,
-            AudioFormat.CHANNEL_IN_MONO,
-            AudioFormat.ENCODING_PCM_16BIT,
-            bufferSize
-        )
-    }
+
     val utils = remember {
         RecordingUtils(
             context = context,
-            audioRecord = audioRecord,
             sampleRate = sampleRate,
             recordedChunks = recordedChunks,
             mediaPlayer = mediaPlayer
@@ -125,20 +106,17 @@ fun RecordAudioScreen(onRecordingComplete: (String) -> Unit) {
         }
     }
 
-
-
-
     DisposableEffect(Unit) {
-        onDispose { mediaPlayer.release() }
-    }
-
-
-            val wavBytes = audioData.toByteArray()
-            writeWavFile(wavBytes, outputFile)
-            finishedFilePath = outputFile.absolutePath
+        onDispose {
+            utils.discardAudio(setIsRecording = { isRecording = it },
+                setHasStoppedRecording = { hasStoppedRecording = it },
+                setIsImported = { isImported = it },
+                updateStatus = { statusText = it },
+                updateTempFile = { lastTempFile = it },
+                updateAmplitudes = { amplitudes = it },
+                setIsPlaying = { isPlaying = it })
+            mediaPlayer.release()
         }
-        thread.start()
-        recordingThread = thread
     }
 
     LaunchedEffect(shouldClearState) {
@@ -188,8 +166,8 @@ fun RecordAudioScreen(onRecordingComplete: (String) -> Unit) {
                                     setIsRecording = { isRecording = it },
                                     setHasStoppedRecording = { hasStoppedRecording = it },
                                     setIsImported = { isImported = it },
-                                    updateTempFile = { lastTempFile = it },
-                                    updateAmplitudes = { amplitudes = it }
+                                    updateAmplitudes = { amplitudes = it },
+                                    updateTempFile = { lastTempFile = it }
                                 )
                             } else {
                                 utils.startRecording(
@@ -221,17 +199,23 @@ fun RecordAudioScreen(onRecordingComplete: (String) -> Unit) {
             }
 
             if (hasStoppedRecording) {
-                if (lastTempFile != null) {
                     Button(
                         onClick = {
                             try {
                                 mediaPlayer.reset()
+                                lastTempFile =
+                                    lastTempFile?.let {
+                                        utils.convertToRawWavForPlayback(context,
+                                            it
+                                        )
+                                    }
                                 mediaPlayer.setDataSource(lastTempFile!!.absolutePath)
                                 mediaPlayer.prepare()
                                 mediaPlayer.start()
                                 isPlaying = true
                                 mediaPlayer.setOnCompletionListener { isPlaying = false }
                             } catch (e: Exception) {
+                                Log.e("Recording", e.stackTraceToString())
                                 e.printStackTrace()
                                 statusText = "Playback failed"
                             }
@@ -240,7 +224,7 @@ fun RecordAudioScreen(onRecordingComplete: (String) -> Unit) {
                     ) {
                         Text(if (isPlaying) "Playing..." else "Play Audio")
                     }
-                }
+
 
                 Button(
                     onClick = {
@@ -262,14 +246,12 @@ fun RecordAudioScreen(onRecordingComplete: (String) -> Unit) {
                 if (!isImported) {
                     Button(
                         onClick = {
-                            utils.resumeRecording {
-                                utils.startRecording(
-                                    onUpdateStatus = { statusText = it },
-                                    setIsRecording = { isRecording = it },
-                                    setHasStoppedRecording = { hasStoppedRecording = it },
-                                    setIsImported = { isImported = it }
-                                )
-                            }
+                            utils.startRecording(
+                                onUpdateStatus = { statusText = it },
+                                setIsRecording = { isRecording = it },
+                                setHasStoppedRecording = { hasStoppedRecording = it },
+                                setIsImported = { isImported = it }
+                            )
                         },
                         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
                     ) {
@@ -293,4 +275,3 @@ fun RecordAudioScreen(onRecordingComplete: (String) -> Unit) {
         }
     }
 }
-

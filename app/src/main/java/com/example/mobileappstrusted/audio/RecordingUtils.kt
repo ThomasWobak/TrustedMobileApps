@@ -1,48 +1,76 @@
 package com.example.mobileappstrusted.audio
 
+import android.Manifest
 import android.content.ContentResolver
 import android.content.Context
+import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaPlayer
+import android.media.MediaRecorder
 import android.net.Uri
+import android.util.Log
+import androidx.annotation.RequiresPermission
+import com.example.mobileappstrusted.audio.InputStreamReader.splitWavIntoBlocks
 import com.example.mobileappstrusted.audio.WavUtils.extractAmplitudesFromWav
+import com.example.mobileappstrusted.audio.WavUtils.writeBlocksToTempFile
 import com.example.mobileappstrusted.audio.WavUtils.writeWavFile
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
-
+private var internalAudioRecord: AudioRecord? = null
 class RecordingUtils(
     private val context: Context,
-    private val audioRecord: AudioRecord,
+
     private val sampleRate: Int,
     private val recordedChunks: MutableList<Byte>,
     private val mediaPlayer: MediaPlayer
 ) {
+    @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     fun startRecording(
         onUpdateStatus: (String) -> Unit,
         setIsRecording: (Boolean) -> Unit,
         setHasStoppedRecording: (Boolean) -> Unit,
         setIsImported: (Boolean) -> Unit
     ) {
+        Log.i("Recording", "Started Recording")
+        if (internalAudioRecord?.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
+            Log.i("Recording", "Already Recording")
+            return // Already recording
+        }
         setIsRecording(true)
         setHasStoppedRecording(false)
         setIsImported(false)
         onUpdateStatus("Recording...")
-        audioRecord.startRecording()
+        // Create a fresh instance each time
+        val bufferSize = AudioRecord.getMinBufferSize(
+            sampleRate,
+            AudioFormat.CHANNEL_IN_MONO,
+            AudioFormat.ENCODING_PCM_16BIT
+        )
 
-        val thread = Thread {
-            val buffer = ByteArray(audioRecord.bufferSizeInFrames)
-            while (audioRecord.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
-                val read = audioRecord.read(buffer, 0, buffer.size)
+        internalAudioRecord = AudioRecord(
+            MediaRecorder.AudioSource.MIC,
+            sampleRate,
+            AudioFormat.CHANNEL_IN_MONO,
+            AudioFormat.ENCODING_PCM_16BIT,
+            bufferSize
+        )
+
+        internalAudioRecord?.startRecording()
+
+        val recordingThread = Thread {
+            val buffer = ByteArray(bufferSize)
+            while (internalAudioRecord?.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
+                val read = internalAudioRecord!!.read(buffer, 0, buffer.size)
                 if (read > 0) {
                     synchronized(recordedChunks) {
                         recordedChunks.addAll(buffer.copyOf(read).toList())
                     }
                 }
             }
-            audioRecord.stop()
+
         }
-        thread.start()
+        recordingThread.start()
     }
 
     fun stopRecording(
@@ -50,22 +78,32 @@ class RecordingUtils(
         setIsRecording: (Boolean) -> Unit,
         setHasStoppedRecording: (Boolean) -> Unit,
         setIsImported: (Boolean) -> Unit,
-        updateTempFile: (File) -> Unit,
-        updateAmplitudes: (List<Int>) -> Unit
+        updateAmplitudes: (List<Int>) -> Unit,
+        updateTempFile: (File) -> Unit
     ) {
         setIsRecording(false)
         setHasStoppedRecording(true)
         setIsImported(false)
         onUpdateStatus("Recording stopped")
 
+        internalAudioRecord?.let {
+            try {
+                it.stop()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+            it.release()
+        }
+        internalAudioRecord = null
+
         val pcm = synchronized(recordedChunks) {
             recordedChunks.toByteArray()
         }
 
         val tempWavFile = File.createTempFile("preview", ".wav", context.cacheDir)
-        writeWavFile(pcm, tempWavFile, sampleRate, 1, 16)
-        updateAmplitudes(extractAmplitudesFromWav(tempWavFile))
+        writeWavFile(pcm, tempWavFile)
         updateTempFile(tempWavFile)
+        updateAmplitudes(extractAmplitudesFromWav(tempWavFile))
     }
 
     fun discardAudio(
@@ -84,15 +122,18 @@ class RecordingUtils(
         updateAmplitudes(emptyList())
         updateTempFile(null)
         setIsPlaying(false)
+        internalAudioRecord?.let {
+            if (it.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
+                it.stop()
+            }
+            it.release()
+        }
+        internalAudioRecord = null
         updateStatus("Press to start recording or import an audio file")
         mediaPlayer.reset()
     }
 
-    fun resumeRecording(
-        startRecording: () -> Unit
-    ) {
-        startRecording()
-    }
+
 
     fun finishRecordingAndGoToEdit(
         lastTempFile: File?,
@@ -109,10 +150,16 @@ class RecordingUtils(
             val finalBytes = synchronized(recordedChunks) {
                 recordedChunks.toByteArray()
             }
-            writeWavFile(finalBytes, outputFile, sampleRate, 1, 16)
+            writeWavFile(finalBytes, outputFile)
             onRecordingComplete(outputFile.absolutePath)
         }
         setShouldClearState(true)
+
+    }
+
+    fun convertToRawWavForPlayback(context: Context, file: File): File {
+        val (header, blocks) = splitWavIntoBlocks(file)
+        return writeBlocksToTempFile(context, header, blocks)
     }
 
     /**
