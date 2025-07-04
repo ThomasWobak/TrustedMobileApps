@@ -70,6 +70,7 @@ object InputStreamReader {
                 .setIsDeleted(false)
                 .setUndeletedHash(com.google.protobuf.ByteString.EMPTY)
                 .setPcmData(com.google.protobuf.ByteString.copyFrom(chunkBytes))
+                .setIsEncrypted(false)
                 .build()
 
             blocks.add(block)

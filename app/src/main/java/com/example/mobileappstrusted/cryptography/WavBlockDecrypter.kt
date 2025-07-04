@@ -23,30 +23,35 @@ object WavBlockDecrypter {
     fun decryptDeletedBlocksWithPassword(
         blocks: List<WavBlockProtos.WavBlock>,
         password: String
-    ): List<WavBlockProtos.WavBlock> {
-        return blocks.map { block ->
-            if (block.isDeleted) {
-                if (block.undeletedHash == null || block.undeletedHash.isEmpty) {
-                    throw IllegalStateException("Missing undeleted_hash for deleted block at index ${block.originalIndex}")
+    ): List<WavBlockProtos.WavBlock>? {
+        return try {
+            blocks.map { block ->
+                if (block.isEncrypted) {
+                    if (block.undeletedHash == null || block.undeletedHash.isEmpty) {
+                        return null
+                    }
+
+                    val decryptedPcm = decrypt(block.pcmData.toByteArray(), password)
+
+                    val actualHash = getEncryptionMessageDigest().digest(decryptedPcm)
+                    val expectedHash = block.undeletedHash.toByteArray()
+
+                    if (!actualHash.contentEquals(expectedHash)) {
+                        return null
+                    }
+
+                    block.toBuilder()
+                        .setPcmData(ByteString.copyFrom(decryptedPcm))
+                        .setIsDeleted(false)
+                        .clearUndeletedHash()
+                        .build()
+                } else {
+                    block
                 }
-
-                val decryptedPcm = decrypt(block.pcmData.toByteArray(), password)
-
-                val actualHash = getEncryptionMessageDigest().digest(decryptedPcm)
-                val expectedHash = block.undeletedHash.toByteArray()
-
-                if (!actualHash.contentEquals(expectedHash)) {
-                    throw IllegalStateException("Decrypted PCM does not match undeleted_hash for block at index ${block.originalIndex}")
-                }
-
-                return@map block.toBuilder()
-                    .setPcmData(ByteString.copyFrom(decryptedPcm))
-                    .setIsDeleted(false)
-                    .clearUndeletedHash()
-                    .build()
             }
-
-            block // unchanged if not deleted
+        } catch (e: Exception) {
+            null
         }
     }
+
 }
