@@ -29,20 +29,27 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.example.mobileappstrusted.audio.InputStreamReader.splitWavIntoBlocks
 import com.example.mobileappstrusted.audio.WavUtils.extractAmplitudesFromWav
-import com.example.mobileappstrusted.audio.WavUtils.extractEditHistoryFromWav
-import com.example.mobileappstrusted.audio.WavUtils.getDeviceId
-import com.example.mobileappstrusted.audio.WavUtils.getDeviceName
+
+import com.example.mobileappstrusted.audio.EditScriptUtils.extractEditHistoryFromWav
+import com.example.mobileappstrusted.audio.MetadataCollector.extractMetaDataFromWav
+import com.example.mobileappstrusted.audio.EditScriptUtils.getDeviceId
+import com.example.mobileappstrusted.audio.EditScriptUtils.getDeviceName
+import com.example.mobileappstrusted.audio.EditScriptUtils.reverseEdits
+import com.example.mobileappstrusted.audio.EditScriptUtils.undoLastEdit
 import com.example.mobileappstrusted.audio.WavUtils.writeBlocksToTempFile
 import com.example.mobileappstrusted.audio.WavUtils.writeWavFileToPersistentStorage
 import com.example.mobileappstrusted.components.NoPathGivenScreen
 import com.example.mobileappstrusted.components.WaveformView
 import com.example.mobileappstrusted.cryptography.MerkleHasher
 import com.example.mobileappstrusted.protobuf.EditHistoryProto
+import com.example.mobileappstrusted.protobuf.RecordingMetadataProto
 import com.example.mobileappstrusted.protobuf.WavBlockProtos
 import java.io.File
 import kotlin.math.min
@@ -57,6 +64,9 @@ fun EditAudioScreen(filePath: String) {
 
     //Edit History
     val editHistoryEntries = remember { mutableStateListOf<EditHistoryProto.EditHistoryEntry>() }
+    var metaData by remember {
+        mutableStateOf(RecordingMetadataProto.RecordingMetadata.newBuilder().build())
+    }
 
 
 
@@ -85,6 +95,14 @@ fun EditAudioScreen(filePath: String) {
     var blocks by remember { mutableStateOf<List<WavBlockProtos.WavBlock>>(emptyList()) }
     var playbackFile by remember { mutableStateOf<File?>(null) }
 
+    //highlight selected Block
+    var selectedBlockIndex by remember { mutableStateOf<Int?>(null) }
+    val visibleBlocks = remember(blocks, deletedBlockIndices) {
+        blocks
+            .filterNot { deletedBlockIndices.contains(it.originalIndex) }
+            .sortedBy { it.currentIndex }
+    }
+
     // 1) load amplitudes + initial mediaPlayer when path changes
     LaunchedEffect(currentFilePath) {
         val f = File(currentFilePath)
@@ -96,10 +114,13 @@ fun EditAudioScreen(filePath: String) {
             val visibleBlocks = blks.filterNot { deletedBlockIndices.contains(it.originalIndex) }
             playbackFile = writeBlocksToTempFile(context, hdr, visibleBlocks)
             amplitudes = extractAmplitudesFromWav(playbackFile!!)
-            // NEW: read edit history from file
+
             extractEditHistoryFromWav(f)?.let { history ->
                 editHistoryEntries.clear()
                 editHistoryEntries.addAll(history.entriesList)
+            }
+            extractMetaDataFromWav(f)?.let { metadata ->
+                metaData = metadata
             }
         } else {
             amplitudes = emptyList()
@@ -163,8 +184,37 @@ fun EditAudioScreen(filePath: String) {
         }
         Spacer(Modifier.height(24.dp))
 
+
+        val barWidthPx = with(LocalDensity.current) { 2.dp.toPx() }
+        val spacePx = with(LocalDensity.current) { 1.dp.toPx() }
+        val canvasWidth = LocalConfiguration.current.screenWidthDp.dp
+        val canvasWidthPx = with(LocalDensity.current) { canvasWidth.toPx() }
+
+        val totalBars = (canvasWidthPx / (barWidthPx + spacePx)).toInt().coerceAtLeast(1)
+
         // waveform
-        if (amplitudes.isNotEmpty()) WaveformView(amplitudes)
+        if (amplitudes.isNotEmpty()) WaveformView(
+            amplitudes = amplitudes,
+            selectedVisualBlockIndex = selectedBlockIndex,
+            totalBlocks = visibleBlocks.size,
+            onBarClick = { barIndex, _ ->
+                val barsPerBlock = totalBars.toFloat() / visibleBlocks.size.coerceAtLeast(1)
+                val blockIndex = (barIndex / barsPerBlock).toInt()
+
+                //Updated the RemoveBlock TextField with the selected value
+                if (blockIndex in visibleBlocks.indices) {
+                    val selected = visibleBlocks[blockIndex]
+                    // Use the block’s *visual index* for highlighting (position in visibleBlocks)
+                    selectedBlockIndex = blockIndex
+                    // But use the actual block's currentIndex for deletion
+                    removeBlockText = selected.currentIndex.toString()
+                }
+            }
+        )
+
+
+
+
         else if (isWav) Text("Loading waveform…", style = MaterialTheme.typography.bodyMedium)
         else Text("Cannot display waveform for non-WAV file.", style = MaterialTheme.typography.bodyMedium)
         Spacer(Modifier.height(24.dp))
@@ -240,7 +290,7 @@ fun EditAudioScreen(filePath: String) {
             OutlinedTextField(
                 value = reorderFromText,
                 onValueChange = { reorderFromText = it },
-                label = { Text("Move block # (orig index)") },
+                label = { Text("Move block # (current index, 0-based)") },
                 keyboardOptions = KeyboardOptions.Default.copy(keyboardType = KeyboardType.Number)
             )
             Spacer(Modifier.height(8.dp))
@@ -255,17 +305,19 @@ fun EditAudioScreen(filePath: String) {
                 reorderError = null
                 val fromIdx = reorderFromText.toIntOrNull()
                 val toPos = reorderToText.toIntOrNull()
-                if (fromIdx == null || toPos == null) reorderError = "Invalid"
-                else {
+                if (fromIdx == null || toPos == null) {
+                    reorderError = "Invalid"
+                } else {
                     var sorted = blocks
                         .filterNot { deletedBlockIndices.contains(it.originalIndex) }
                         .sortedBy { it.currentIndex }
                         .toMutableList()
-                    val rem = sorted.indexOfFirst { it.originalIndex == fromIdx }
-                    if (rem < 0 || toPos < 0 || toPos > sorted.size) reorderError = "Out of range"
-                    else {
-                        val b = sorted.removeAt(rem)
-                        sorted.add(min(toPos, sorted.size), b)
+
+                    if (fromIdx !in sorted.indices || toPos !in 0..sorted.size) {
+                        reorderError = "Out of range"
+                    } else {
+                        val block = sorted.removeAt(fromIdx)
+                        sorted.add(min(toPos, sorted.size), block)
 
                         sorted = sorted.mapIndexed { i, blk ->
                             blk.toBuilder()
@@ -287,7 +339,8 @@ fun EditAudioScreen(filePath: String) {
                         editHistoryEntries.add(entry)
                     }
                 }
-            }, Modifier.align(Alignment.End)) {
+            }
+            , Modifier.align(Alignment.End)) {
                 Text("Apply Reorder")
             }
             Spacer(Modifier.height(8.dp))
@@ -340,7 +393,9 @@ fun EditAudioScreen(filePath: String) {
                                         .addAllEntries(editHistoryEntries)
                                         .build()
 
-                                    writeWavFileToPersistentStorage(outStream, blocks, merkleRoot, editHistory)
+
+                                    writeWavFileToPersistentStorage(outStream, blocks, merkleRoot, editHistory, metaData)
+
 
                                     Toast.makeText(context, "Audio exported to Music/$fileName", Toast.LENGTH_LONG).show()
                                 }
@@ -357,7 +412,42 @@ fun EditAudioScreen(filePath: String) {
             ) {
                 Text("Export Audio")
             }
+            Button(
+                onClick = {
+                    val (newBlocks, newDeleted, newHistory) = undoLastEdit(blocks, deletedBlockIndices, editHistory = EditHistoryProto.EditHistory.newBuilder()
+                        .addAllEntries(editHistoryEntries)
+                        .build())
+                    blocks = newBlocks
+                    deletedBlockIndices = newDeleted
+                    editHistoryEntries.clear()
+                    editHistoryEntries.addAll(newHistory.entriesList)
 
+
+                    Toast.makeText(context, "Last state restored from edit history", Toast.LENGTH_SHORT).show()
+                },
+                modifier = Modifier.align(Alignment.End)
+            ) {
+                Text("Undo last edit")
+            }
+
+            Button(
+                onClick = {
+                    val reversed = reverseEdits(
+                        blocks = blocks,
+                        deletedBlockIndices = deletedBlockIndices,
+                        editHistory = EditHistoryProto.EditHistory.newBuilder()
+                            .addAllEntries(editHistoryEntries)
+                            .build()
+                    )
+                    blocks = reversed.first
+                    deletedBlockIndices = reversed.second
+
+                    Toast.makeText(context, "Original state restored from edit history", Toast.LENGTH_SHORT).show()
+                },
+                modifier = Modifier.align(Alignment.End)
+            ) {
+                Text("Restore Original File")
+            }
             Spacer(Modifier.height(32.dp))
             Text("Edit History:", style = MaterialTheme.typography.headlineSmall)
 
@@ -370,6 +460,15 @@ fun EditAudioScreen(filePath: String) {
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
+            }
+            if (metaData==null) {
+                Text("No metadata recorded.", style = MaterialTheme.typography.bodyMedium)
+            } else {
+                Text(
+                    "Collected Metadata: ${metaData.toString()}",
+                    style = MaterialTheme.typography.bodySmall
+                )
+
             }
 
         }

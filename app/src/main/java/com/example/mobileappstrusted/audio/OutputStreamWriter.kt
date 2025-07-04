@@ -4,6 +4,7 @@ import android.util.Log
 import com.example.mobileappstrusted.cryptography.ORIGINAL_MERKLE_ROOT_HASH_CHUNK_IDENTIFIER
 import com.example.mobileappstrusted.protobuf.EditHistoryProto
 import com.example.mobileappstrusted.protobuf.OmrhBlockProtos
+import com.example.mobileappstrusted.protobuf.RecordingMetadataProto
 import com.example.mobileappstrusted.protobuf.WavBlockProtos
 import com.google.protobuf.ByteString
 import java.io.ByteArrayOutputStream
@@ -64,7 +65,18 @@ object OutputStreamWriter {
         outputStream.write(historyBytes)
     }
 
-    fun writeWavHeaderToStream(pcmDataSize: Int, merkleChunkSize: Int, editHistorySize: Int, outputStream: OutputStream) {
+    fun writeMetaDataChunkToStream(outputStream: OutputStream, metadata: RecordingMetadataProto.RecordingMetadata) {
+        val metadataBytes = metadata.toByteArray()
+        val chunkId = "meta".toByteArray(Charsets.US_ASCII)
+        val chunkSizeBytes = ByteBuffer.allocate(4)
+            .order(ByteOrder.LITTLE_ENDIAN).putInt(metadataBytes.size).array()
+
+        outputStream.write(chunkId)
+        outputStream.write(chunkSizeBytes)
+        outputStream.write(metadataBytes)
+    }
+
+    fun writeWavHeaderToStream(pcmDataSize: Int, merkleChunkSize: Int, editHistorySize: Int, metaDataSize: Int, outputStream: OutputStream) {
         val sampleRate = 44100
         val channels = 1
         val bitDepth = 16
@@ -75,13 +87,18 @@ object OutputStreamWriter {
         val chunkDataHeader = 8
         val chunkOmrhHeader = 8
         val chunkEdhiHeader = 8
+        val chunkMetaHeader = 8
         val riffHeader = 4
+
+
 
         val riffSize = riffHeader +
                 chunkFmtHeader + chunkFmtSize +
                 chunkDataHeader + pcmDataSize +
                 chunkOmrhHeader + merkleChunkSize +
-                chunkEdhiHeader + editHistorySize
+                chunkEdhiHeader + editHistorySize +
+                chunkMetaHeader + metaDataSize
+
 
         val header = ByteArray(44)
 

@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+option java_package = "com.example.mobileappstrusted.protobuf";
+option java_outer_classname = "RecordingMetadataProto"; //
+
+
+message RecordingMetadata {
+  string device_id = 1;
+  string device_name = 2;
+  string manufacturer = 3;
+  string model = 4;
+  string brand = 5;
+  string product = 6;
+  string hardware = 7;
+  string board = 8;
+  string host = 9;
+  string android_version = 10;
+  string android_sdk = 11;
+  string app_version = 12;
+  string app_package = 13;
+  string locale = 14;
+  string timezone = 15;
+  int64 timestamp = 16;
+  string display_metrics = 17;
+  string cpu_abi = 18;
+  string supported_abis = 19;
+  string bootloader = 20;
+  string fingerprint = 21;
+  string user = 22;
+  string type = 23;
+}
