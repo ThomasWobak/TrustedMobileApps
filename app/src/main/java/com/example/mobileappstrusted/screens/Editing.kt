@@ -44,7 +44,7 @@ import com.example.mobileappstrusted.audio.EditScriptUtils.getDeviceName
 import com.example.mobileappstrusted.audio.WavUtils.writeBlocksToTempFile
 import com.example.mobileappstrusted.audio.WavUtils.writeWavFileToPersistentStorage
 import com.example.mobileappstrusted.components.NoPathGivenScreen
-import com.example.mobileappstrusted.components.WaveformView
+import com.example.mobileappstrusted.components.WaveformViewEditing
 import com.example.mobileappstrusted.cryptography.MerkleHasher
 import com.example.mobileappstrusted.protobuf.EditHistoryProto
 import com.example.mobileappstrusted.protobuf.RecordingMetadataProto
@@ -94,7 +94,8 @@ fun EditAudioScreen(filePath: String) {
     var playbackFile by remember { mutableStateOf<File?>(null) }
 
     //highlight selected Block
-    var selectedBlockIndex by remember { mutableStateOf<Int?>(null) }
+    var selectedBlockIndices by remember { mutableStateOf<Set<Int>>(emptySet()) }
+
     val visibleBlocks = remember(blocks, deletedBlockIndices) {
         blocks
             .filterNot { deletedBlockIndices.contains(it.originalIndex) }
@@ -191,24 +192,22 @@ fun EditAudioScreen(filePath: String) {
         val totalBars = (canvasWidthPx / (barWidthPx + spacePx)).toInt().coerceAtLeast(1)
 
         // waveform
-        if (amplitudes.isNotEmpty()) WaveformView(
+        if (amplitudes.isNotEmpty()) WaveformViewEditing (
             amplitudes = amplitudes,
-            selectedVisualBlockIndex = selectedBlockIndex,
-            totalBlocks = visibleBlocks.size,
-            onBarClick = { barIndex, _ ->
+            selectedVisualBlockIndices = selectedBlockIndices,
+            visibleBlocks = visibleBlocks,
+            onBarRangeSelect = { start, end ->
                 val barsPerBlock = totalBars.toFloat() / visibleBlocks.size.coerceAtLeast(1)
-                val blockIndex = (barIndex / barsPerBlock).toInt()
+                val blockIndices = (start..end).mapNotNull { bar ->
+                    val blockIndex = (bar / barsPerBlock).toInt()
+                    visibleBlocks.getOrNull(blockIndex)?.currentIndex
+                }.toSet()
 
-                //Updated the RemoveBlock TextField with the selected value
-                if (blockIndex in visibleBlocks.indices) {
-                    val selected = visibleBlocks[blockIndex]
-                    // Use the block’s *visual index* for highlighting (position in visibleBlocks)
-                    selectedBlockIndex = blockIndex
-                    // But use the actual block's currentIndex for deletion
-                    removeBlockText = selected.currentIndex.toString()
-                }
+                selectedBlockIndices = blockIndices
+                removeBlockText = blockIndices.sorted().joinToString(",")
             }
         )
+
 
 
 
@@ -221,12 +220,6 @@ fun EditAudioScreen(filePath: String) {
             Text("Editing features only support WAV files.", color = MaterialTheme.colorScheme.error)
         } else {
             Text("Remove Block", style = MaterialTheme.typography.headlineSmall)
-            Text(
-                "Visible Order: " + blocks
-                    .filterNot { deletedBlockIndices.contains(it.originalIndex) }
-                    .sortedBy { it.currentIndex }
-                    .joinToString(",") { it.originalIndex.toString() }
-            )
 
             OutlinedTextField(
                 value = removeBlockText,
@@ -237,60 +230,48 @@ fun EditAudioScreen(filePath: String) {
             Spacer(Modifier.height(8.dp))
 
             Button(onClick = {
-                removeBlockError = null
-                val indexToRemove = removeBlockText.toIntOrNull()
-                if (indexToRemove == null) {
-                    removeBlockError = "Invalid input"
-                } else if (!blocks.any { it.originalIndex == indexToRemove }) {
-                    removeBlockError = "Block not found"
-                } else if (deletedBlockIndices.contains(indexToRemove)) {
-                    removeBlockError = "Already deleted"
-                } else {
-                    deletedBlockIndices = deletedBlockIndices + indexToRemove
-                    removeBlockText = ""
-                    val entry = EditHistoryProto.EditHistoryEntry.newBuilder()
-                        .setUserId(getDeviceName())
-                        .setDeviceId(getDeviceId(context))
-                        .setTimestamp(System.currentTimeMillis())
-                        .setChangeType(EditHistoryProto.ChangeType.DELETE_BLOCK)
-                        .putDetails("blockIndex", "" + indexToRemove)
-                        .build()
-                    editHistoryEntries.add(entry)
-
+                val indices = removeBlockText.split(",").mapNotNull { it.trim().toIntOrNull() }
+                val invalid = indices.filter { idx ->
+                    !blocks.any { it.originalIndex == idx } || deletedBlockIndices.contains(idx)
                 }
+
+                if (indices.isEmpty()) {
+                    removeBlockError = "Invalid input"
+                } else if (invalid.isNotEmpty()) {
+                    removeBlockError = "Invalid or already deleted: ${invalid.joinToString(",")}"
+                } else {
+                    deletedBlockIndices = deletedBlockIndices + indices
+                    removeBlockText = ""
+
+                    indices.forEach { idx ->
+                        val entry = EditHistoryProto.EditHistoryEntry.newBuilder()
+                            .setUserId(getDeviceName())
+                            .setDeviceId(getDeviceId(context))
+                            .setTimestamp(System.currentTimeMillis())
+                            .setChangeType(EditHistoryProto.ChangeType.DELETE_BLOCK)
+                            .putDetails("blockIndex", idx.toString())
+                            .build()
+                        editHistoryEntries.add(entry)
+                    }
+                }
+
+
             }, modifier = Modifier.align(Alignment.End)) {
                 Text("Mark as Deleted")
             }
             Spacer(Modifier.height(8.dp))
-            Button(onClick = {
-                deletedBlockIndices = emptySet()
-                val entry = EditHistoryProto.EditHistoryEntry.newBuilder()
-                    .setUserId(getDeviceName())
-                    .setDeviceId(getDeviceId(context))
-                    .setTimestamp(System.currentTimeMillis())
-                    .setChangeType(EditHistoryProto.ChangeType.RESTORE_BLOCK)
-                    .putDetails("Restored Blocks", "AllBlocks")
-                    .build()
-                editHistoryEntries.add(entry)
-            }, modifier = Modifier.align(Alignment.End)) {
-                Text("Restore All")
-            }
             removeBlockError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             Spacer(Modifier.height(24.dp))
 
             Text("Reorder Blocks", style = MaterialTheme.typography.headlineSmall)
-            Text(
-                "Order: " + blocks
-                    .filterNot { deletedBlockIndices.contains(it.originalIndex) }
-                    .sortedBy { it.currentIndex }
-                    .joinToString(",") { it.originalIndex.toString() }
-            )
+
             OutlinedTextField(
                 value = reorderFromText,
                 onValueChange = { reorderFromText = it },
                 label = { Text("Move block # (current index, 0-based)") },
                 keyboardOptions = KeyboardOptions.Default.copy(keyboardType = KeyboardType.Number)
             )
+
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(
                 value = reorderToText,
