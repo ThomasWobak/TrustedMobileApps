@@ -50,7 +50,6 @@ import com.example.mobileappstrusted.protobuf.EditHistoryProto
 import com.example.mobileappstrusted.protobuf.RecordingMetadataProto
 import com.example.mobileappstrusted.protobuf.WavBlockProtos
 import java.io.File
-import kotlin.math.min
 
 @Composable
 fun EditAudioScreen(filePath: String) {
@@ -84,6 +83,9 @@ fun EditAudioScreen(filePath: String) {
     var removeBlockText by remember { mutableStateOf("") }
     var removeBlockError by remember { mutableStateOf<String?>(null) }
 
+
+
+
     var deletedBlockIndices by remember { mutableStateOf<Set<Int>>(emptySet()) }
 
     val isWav = currentFilePath.lowercase().endsWith(".wav")
@@ -96,6 +98,8 @@ fun EditAudioScreen(filePath: String) {
     //highlight selected Block
     var selectedBlockIndices by remember { mutableStateOf<Set<Int>>(emptySet()) }
 
+
+
     val visibleBlocks = remember(blocks, deletedBlockIndices) {
         blocks
             .filterNot { deletedBlockIndices.contains(it.originalIndex) }
@@ -104,6 +108,8 @@ fun EditAudioScreen(filePath: String) {
     var maxAmplitude by remember { mutableStateOf(1) }
 
     // 1) load amplitudes + initial mediaPlayer when path changes
+    var selectedPlaybackFile by remember { mutableStateOf<File?>(null) }
+
     LaunchedEffect(currentFilePath) {
         val f = File(currentFilePath)
         if (f.exists() && isWav) {
@@ -140,6 +146,9 @@ fun EditAudioScreen(filePath: String) {
             verificationChecked = true
         }
     }
+    val selectedPlayer = remember { MediaPlayer() }
+    var isPlayingSelected by remember { mutableStateOf(false) }
+
 
     LaunchedEffect(blocks, deletedBlockIndices) {
         val hdr = wavHeader ?: return@LaunchedEffect
@@ -156,6 +165,9 @@ fun EditAudioScreen(filePath: String) {
     DisposableEffect(mediaPlayer) {
         onDispose { mediaPlayer.release() }
     }
+    DisposableEffect(selectedPlayer) {
+        onDispose { selectedPlayer.release() }
+    }
 
 
     var selectedAmplitudes by remember { mutableStateOf<List<Int>>(emptyList()) }
@@ -168,11 +180,20 @@ fun EditAudioScreen(filePath: String) {
 
         if (selectedBlocks.isNotEmpty()) {
             val tempFile = writeBlocksToTempFile(context, hdr, selectedBlocks)
+            selectedPlaybackFile = tempFile
             selectedAmplitudes = extractAmplitudesFromWav(tempFile)
         } else {
             selectedAmplitudes = emptyList()
         }
+        selectedPlayer.reset()
+        if (selectedBlocks.isNotEmpty()) {
+            selectedPlaybackFile?.let {
+                selectedPlayer.setDataSource(it.absolutePath)
+                selectedPlayer.prepare()
+            }
+        }
     }
+
 
 
 
@@ -229,6 +250,7 @@ fun EditAudioScreen(filePath: String) {
 
                 selectedBlockIndices = blockIndices
                 removeBlockText = blockIndices.sorted().joinToString(",")
+                reorderFromText = blockIndices.sorted().joinToString(",")
             }
         )
 
@@ -306,9 +328,9 @@ fun EditAudioScreen(filePath: String) {
             Spacer(Modifier.height(8.dp))
             Button(onClick = {
                 reorderError = null
-                val fromIdx = reorderFromText.toIntOrNull()
+                val fromIndices = reorderFromText.split(",").mapNotNull { it.trim().toIntOrNull() }.distinct().sorted()
                 val toPos = reorderToText.toIntOrNull()
-                if (fromIdx == null || toPos == null) {
+                if (fromIndices.isEmpty() || toPos == null) {
                     reorderError = "Invalid"
                 } else {
                     var sorted = blocks
@@ -316,30 +338,36 @@ fun EditAudioScreen(filePath: String) {
                         .sortedBy { it.currentIndex }
                         .toMutableList()
 
-                    if (fromIdx !in sorted.indices || toPos !in 0..sorted.size) {
+                    if (fromIndices.any { it !in sorted.indices } || toPos !in 0..sorted.size) {
                         reorderError = "Out of range"
                     } else {
-                        val block = sorted.removeAt(fromIdx)
-                        sorted.add(min(toPos, sorted.size), block)
+                        val blocksToMove = fromIndices.map { sorted[it] }
+                        // Remove all at once, starting from highest index to preserve positions
+                        fromIndices.sortedDescending().forEach { sorted.removeAt(it) }
 
+                        // Insert blocks at desired position
+                        sorted.addAll(toPos.coerceAtMost(sorted.size), blocksToMove)
+
+                        // Reassign current indices
                         sorted = sorted.mapIndexed { i, blk ->
-                            blk.toBuilder()
-                                .setCurrentIndex(i)
-                                .build()
+                            blk.toBuilder().setCurrentIndex(i).build()
                         }.toMutableList()
 
                         blocks = sorted
                         reorderFromText = ""
                         reorderToText = ""
 
-                        val entry = EditHistoryProto.EditHistoryEntry.newBuilder()
-                            .setUserId(getDeviceName())
-                            .setDeviceId(getDeviceId(context))
-                            .setTimestamp(System.currentTimeMillis())
-                            .setChangeType(EditHistoryProto.ChangeType.REORDER_BLOCK)
-                            .putDetails("Moved Block", "from $fromIdx to $toPos")
-                            .build()
-                        editHistoryEntries.add(entry)
+                        blocksToMove.forEach { blk ->
+                            val entry = EditHistoryProto.EditHistoryEntry.newBuilder()
+                                .setUserId(getDeviceName())
+                                .setDeviceId(getDeviceId(context))
+                                .setTimestamp(System.currentTimeMillis())
+                                .setChangeType(EditHistoryProto.ChangeType.REORDER_BLOCK)
+                                .putDetails("Moved Block", "to $toPos")
+                                .putDetails("Original Index", blk.currentIndex.toString())
+                                .build()
+                            editHistoryEntries.add(entry)
+                        }
                     }
                 }
             }, Modifier.align(Alignment.End)) {
@@ -426,6 +454,20 @@ fun EditAudioScreen(filePath: String) {
                 maxAmplitude = maxAmplitude,
                 onBarRangeSelect = { _, _ -> } // no-op for preview
             )
+            Spacer(Modifier.height(8.dp))
+            Button(onClick = {
+                if (!isPlayingSelected) {
+                    selectedPlayer.start()
+                    isPlayingSelected = true
+                    selectedPlayer.setOnCompletionListener { isPlayingSelected = false }
+                } else {
+                    selectedPlayer.pause()
+                    isPlayingSelected = false
+                }
+            }) {
+                Text(if (isPlayingSelected) "Pause Selected" else "Play Selected")
+            }
+
         }
     }
 }
