@@ -41,4 +41,15 @@ sealed class NavScreen(
             return "edit/${Uri.encode(filePath)}"
         }
     }
+    object Debug : NavScreen(
+        route = "debug",
+        label = "Debug",
+        icon = Icons.Default.Edit // or choose a different icon if you prefer
+    ) {
+        const val routeWithArgs = "debug/{filePath}"
+
+        fun createRoute(filePath: String): String {
+            return "debug/${Uri.encode(filePath)}"
+        }
+    }
 }
