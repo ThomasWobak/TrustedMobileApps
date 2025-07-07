@@ -19,8 +19,10 @@ fun WaveformViewEditing(
     amplitudes: List<Int>,
     selectedVisualBlockIndices: Set<Int>,
     visibleBlocks: List<WavBlockProtos.WavBlock>,
+    maxAmplitude: Int,
     onBarRangeSelect: (startBar: Int, endBar: Int) -> Unit
-) {
+)
+ {
     val barWidth = 2.dp
     val space = 1.dp
 
@@ -68,7 +70,8 @@ fun WaveformViewEditing(
         val barSpacing = barWidth.toPx() + space.toPx()
         val totalBars = (size.width / barSpacing).toInt().coerceAtLeast(1)
         val step = (amplitudes.size / totalBars).coerceAtLeast(1)
-        val maxAmp = amplitudes.maxOrNull()?.toFloat()?.coerceAtLeast(1f) ?: 1f
+        val maxAmp = maxAmplitude.toFloat().coerceAtLeast(1f)
+
 
         // Draw shaded background rectangle for selected blocks based on CURRENT index
         if (visibleBlocks.isNotEmpty()) {

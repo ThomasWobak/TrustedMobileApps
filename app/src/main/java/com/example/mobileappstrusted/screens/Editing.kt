@@ -101,6 +101,7 @@ fun EditAudioScreen(filePath: String) {
             .filterNot { deletedBlockIndices.contains(it.originalIndex) }
             .sortedBy { it.currentIndex }
     }
+    var maxAmplitude by remember { mutableStateOf(1) }
 
     // 1) load amplitudes + initial mediaPlayer when path changes
     LaunchedEffect(currentFilePath) {
@@ -113,6 +114,7 @@ fun EditAudioScreen(filePath: String) {
             val visibleBlocks = blks.filterNot { deletedBlockIndices.contains(it.originalIndex) }
             playbackFile = writeBlocksToTempFile(context, hdr, visibleBlocks)
             amplitudes = extractAmplitudesFromWav(playbackFile!!)
+            maxAmplitude = amplitudes.maxOrNull()?.coerceAtLeast(1) ?: 1
 
             extractEditHistoryFromWav(f)?.let { history ->
                 editHistoryEntries.clear()
@@ -123,6 +125,8 @@ fun EditAudioScreen(filePath: String) {
             }
         } else {
             amplitudes = emptyList()
+            maxAmplitude = amplitudes.maxOrNull()?.coerceAtLeast(1) ?: 1
+
         }
 
         mediaPlayer.reset()
@@ -152,6 +156,25 @@ fun EditAudioScreen(filePath: String) {
     DisposableEffect(mediaPlayer) {
         onDispose { mediaPlayer.release() }
     }
+
+
+    var selectedAmplitudes by remember { mutableStateOf<List<Int>>(emptyList()) }
+
+    LaunchedEffect(selectedBlockIndices, blocks, deletedBlockIndices) {
+        val hdr = wavHeader ?: return@LaunchedEffect
+        val selectedBlocks = blocks
+            .filterNot { deletedBlockIndices.contains(it.originalIndex) }
+            .filter { selectedBlockIndices.contains(it.currentIndex) }
+
+        if (selectedBlocks.isNotEmpty()) {
+            val tempFile = writeBlocksToTempFile(context, hdr, selectedBlocks)
+            selectedAmplitudes = extractAmplitudesFromWav(tempFile)
+        } else {
+            selectedAmplitudes = emptyList()
+        }
+    }
+
+
 
     Column(
         modifier = Modifier
@@ -196,6 +219,7 @@ fun EditAudioScreen(filePath: String) {
             amplitudes = amplitudes,
             selectedVisualBlockIndices = selectedBlockIndices,
             visibleBlocks = visibleBlocks,
+            maxAmplitude = maxAmplitude,
             onBarRangeSelect = { start, end ->
                 val barsPerBlock = totalBars.toFloat() / visibleBlocks.size.coerceAtLeast(1)
                 val blockIndices = (start..end).mapNotNull { bar ->
@@ -391,6 +415,17 @@ fun EditAudioScreen(filePath: String) {
             ) {
                 Text("Export Audio")
             }
+        }
+        if (selectedAmplitudes.isNotEmpty()) {
+            Spacer(Modifier.height(24.dp))
+            Text("Preview of Selected Blocks", style = MaterialTheme.typography.headlineSmall)
+            WaveformViewEditing(
+                amplitudes = selectedAmplitudes,
+                selectedVisualBlockIndices = emptySet(),
+                visibleBlocks = emptyList(), // not needed for this waveform
+                maxAmplitude = maxAmplitude,
+                onBarRangeSelect = { _, _ -> } // no-op for preview
+            )
         }
     }
 }
