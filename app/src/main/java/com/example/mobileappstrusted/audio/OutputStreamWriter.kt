@@ -76,7 +76,7 @@ object OutputStreamWriter {
         outputStream.write(metadataBytes)
     }
 
-    fun writeWavHeaderToStream(pcmDataSize: Int, merkleChunkSize: Int, editHistorySize: Int, metaDataSize: Int, digitalSignatureSize: Int, outputStream: OutputStream) {
+    fun writeWavHeaderToStream(pcmDataSize: Int, merkleChunkSize: Int, editHistorySize: Int, metaDataSize: Int, outputStream: OutputStream) {
         val sampleRate = 44100
         val channels = 1
         val bitDepth = 16
