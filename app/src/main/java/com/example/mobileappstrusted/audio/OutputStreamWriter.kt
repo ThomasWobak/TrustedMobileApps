@@ -76,7 +76,7 @@ object OutputStreamWriter {
         outputStream.write(metadataBytes)
     }
 
-    fun writeWavHeaderToStream(pcmDataSize: Int, merkleChunkSize: Int, editHistorySize: Int, metaDataSize: Int, outputStream: OutputStream) {
+    fun writeWavHeaderToStream(pcmDataSize: Int, merkleChunkSize: Int, editHistorySize: Int, metaDataSize: Int, digitalSignatureSize: Int, outputStream: OutputStream) {
         val sampleRate = 44100
         val channels = 1
         val bitDepth = 16
@@ -136,6 +136,13 @@ object OutputStreamWriter {
         outputStream.write(header)
     }
 
+    fun writeSignatureChunkToStream(outputStream: OutputStream, signature: ByteArray) {
+        val chunkId = "dsig".toByteArray(Charsets.US_ASCII)
+        val chunkSize = signature.size
+        val sizeBytes = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(chunkSize).array()
 
-
+        outputStream.write(chunkId)     // 4 bytes: 'dsig'
+        outputStream.write(sizeBytes)   // 4 bytes: chunk size
+        outputStream.write(signature)   // N bytes: actual signature
+    }
 }

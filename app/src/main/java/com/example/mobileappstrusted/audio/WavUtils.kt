@@ -5,13 +5,18 @@ import com.example.mobileappstrusted.audio.InputStreamReader.chunkRawPcm
 import com.example.mobileappstrusted.audio.OutputStreamWriter.writeEditHistoryChunkToStream
 import com.example.mobileappstrusted.audio.OutputStreamWriter.writeMerkleRootChunkToStream
 import com.example.mobileappstrusted.audio.OutputStreamWriter.writeMetaDataChunkToStream
+import com.example.mobileappstrusted.audio.OutputStreamWriter.writeSignatureChunkToStream
 import com.example.mobileappstrusted.audio.OutputStreamWriter.writeWavBlocksToStream
 import com.example.mobileappstrusted.audio.OutputStreamWriter.writeWavHeaderToStream
+import com.example.mobileappstrusted.cryptography.DigitalSignatureUtils.isPrivateKeyStored
+import com.example.mobileappstrusted.cryptography.DigitalSignatureUtils.loadPrivateKeyFromPrefs
+import com.example.mobileappstrusted.cryptography.DigitalSignatureUtils.signData
 import com.example.mobileappstrusted.cryptography.MerkleHasher
 import com.example.mobileappstrusted.protobuf.EditHistoryProto
 import com.example.mobileappstrusted.protobuf.RecordingMetadataProto
 import com.example.mobileappstrusted.protobuf.WavBlockProtos
 import com.google.protobuf.CodedOutputStream
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.OutputStream
 import kotlin.math.abs
@@ -102,12 +107,16 @@ object WavUtils {
     }
 
     fun writeWavFileToPersistentStorage(
+        context: Context,
         outputStream: OutputStream,
         blocks: List<WavBlockProtos.WavBlock>,
         merkleRoot: ByteArray,
         editHistory: EditHistoryProto.EditHistory,
         metaData: RecordingMetadataProto.RecordingMetadata
     ) {
+        // Step 1: Write all WAV data to a temporary buffer
+        val tempBuffer = ByteArrayOutputStream()
+
         val dataBlocksSize = blocks.sumOf { block ->
             val blockBytes = block.toByteArray()
             val prefixSize = CodedOutputStream.computeUInt32SizeNoTag(blockBytes.size)
@@ -115,24 +124,43 @@ object WavUtils {
         }
 
         val editHistorySize = editHistory.toByteArray().size
-        val metaDataSize= metaData.toByteArray().size
+        val metaDataSize = metaData.toByteArray().size
 
-        writeWavHeaderToStream( pcmDataSize = dataBlocksSize,
+        writeWavHeaderToStream(
+            pcmDataSize = dataBlocksSize,
             merkleChunkSize = 35,
             editHistorySize = editHistorySize,
-            metaDataSize= metaDataSize,
-            outputStream)
+            metaDataSize = metaDataSize,
+            outputStream = tempBuffer
+        )
 
-        writeWavBlocksToStream(outputStream, blocks)
-        writeMerkleRootChunkToStream(outputStream, merkleRoot)
-        writeEditHistoryChunkToStream(outputStream, editHistory)
-        writeMetaDataChunkToStream(outputStream, metaData)
+        writeWavBlocksToStream(tempBuffer, blocks)
+        writeMerkleRootChunkToStream(tempBuffer, merkleRoot)
+        writeEditHistoryChunkToStream(tempBuffer, editHistory)
+        writeMetaDataChunkToStream(tempBuffer, metaData)
 
-        // Write audio blocks
-        blocks.sortedBy { it.currentIndex }.forEach { block ->
-            outputStream.write(block.toByteArray())
+        val wavBytes = tempBuffer.toByteArray()
+
+        // Step 2: If key exists, sign the full buffer
+        val signature: ByteArray? = if (isPrivateKeyStored(context)) {
+            try {
+                val privateKey = loadPrivateKeyFromPrefs(context)
+                signData(wavBytes, privateKey!!)
+            } catch (e: Exception) {
+                e.printStackTrace()
+                null // Skip signing if something fails
+            }
+        } else null
+
+        // Step 3: Write everything to the final persistent output stream
+        outputStream.write(wavBytes)
+
+        // Step 4: If signature is present, write it as an extra chunk
+        if (signature != null) {
+            writeSignatureChunkToStream(outputStream, signature)
         }
     }
+
     fun writeWavToTemporaryStorage(pcmData: ByteArray, outputFile: File) {
         val blocks = chunkRawPcm(pcmData)
         val merkleRoot = MerkleHasher.buildMerkleRoot(blocks)
