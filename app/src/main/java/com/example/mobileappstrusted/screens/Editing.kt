@@ -41,6 +41,7 @@ import com.example.mobileappstrusted.audio.EditScriptUtils.extractEditHistoryFro
 import com.example.mobileappstrusted.audio.MetadataCollector.extractMetaDataFromWav
 import com.example.mobileappstrusted.audio.EditScriptUtils.getDeviceId
 import com.example.mobileappstrusted.audio.EditScriptUtils.getDeviceName
+import com.example.mobileappstrusted.audio.EditScriptUtils.undoLastEdit
 import com.example.mobileappstrusted.audio.WavUtils.writeBlocksToTempFile
 import com.example.mobileappstrusted.audio.WavUtils.writeWavFileToPersistentStorage
 import com.example.mobileappstrusted.components.NoPathGivenScreen
@@ -64,8 +65,6 @@ fun EditAudioScreen(filePath: String) {
     var metaData by remember {
         mutableStateOf(RecordingMetadataProto.RecordingMetadata.newBuilder().build())
     }
-
-
 
 
     val currentFilePath by remember { mutableStateOf(filePath) }
@@ -442,6 +441,23 @@ fun EditAudioScreen(filePath: String) {
                 modifier = Modifier.align(Alignment.End)
             ) {
                 Text("Export Audio")
+            }
+            Button(
+                onClick = {
+                    val (newBlocks, newDeleted, newHistory) = undoLastEdit(blocks, deletedBlockIndices, editHistory = EditHistoryProto.EditHistory.newBuilder()
+                        .addAllEntries(editHistoryEntries)
+                        .build())
+                    blocks = newBlocks
+                    deletedBlockIndices = newDeleted
+                    editHistoryEntries.clear()
+                    editHistoryEntries.addAll(newHistory.entriesList)
+
+
+                    Toast.makeText(context, "Last state restored from edit history", Toast.LENGTH_SHORT).show()
+                },
+                modifier = Modifier.align(Alignment.End)
+            ) {
+                Text("Undo last edit")
             }
         }
         if (selectedAmplitudes.isNotEmpty()) {

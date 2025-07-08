@@ -3,14 +3,18 @@ package com.example.mobileappstrusted.components
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.input.pointer.*
+import com.example.mobileappstrusted.audio.InputStreamReader
 import com.example.mobileappstrusted.protobuf.WavBlockProtos
 import kotlin.math.min
 
@@ -20,12 +24,12 @@ fun WaveformViewEditing(
     selectedVisualBlockIndices: Set<Int>,
     visibleBlocks: List<WavBlockProtos.WavBlock>,
     maxAmplitude: Int,
+    blockDurationSeconds: Float = InputStreamReader.BLOCK_TIME, //Current Block size to time ratio
     onBarRangeSelect: (startBar: Int, endBar: Int) -> Unit
 )
  {
     val barWidth = 2.dp
     val space = 1.dp
-
 
     Canvas(
         modifier = Modifier
@@ -114,4 +118,18 @@ fun WaveformViewEditing(
             )
         }
     }
-}
+     Row(modifier = Modifier.fillMaxWidth()) {
+         val totalDuration = visibleBlocks.size * blockDurationSeconds
+         val markerCount = 5
+         val secondsPerMarker = totalDuration / markerCount
+
+         repeat(markerCount + 1) { i ->
+             Text(
+                 text = "${(i * secondsPerMarker).toInt()}s",
+                 modifier = Modifier.weight(1f),
+                 style = MaterialTheme.typography.labelSmall
+             )
+         }
+     }
+
+ }

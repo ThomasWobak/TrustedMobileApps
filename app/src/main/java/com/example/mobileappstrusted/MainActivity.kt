@@ -12,7 +12,7 @@
 // Lukas
 
 //TODO: Implement editing script with metadata and changes (user information) DONE
-//TODO: Implement general metadata on recording (user information)
+//TODO: Implement general metadata on recording (user information) DONE
 // Thomas
 
 //TODO usability
@@ -25,9 +25,9 @@
 //TODO: Improve Record Audio Screen (Showing audio being recorded, resuming recording,...) DONE
 //TODO: Implement reversing operation using temporary in memory editing script DONE
 
-//TODO: Improve cutting of audio (ease of use)
-//TODO: Improve removing of audio (granularity?, ease of use)
-//TODO: Implement menu in editing screen
+//TODO: Improve cutting of audio (ease of use) GOOD ENOUGH?
+//TODO: Improve removing of audio (granularity?, ease of use) GOOD ENOUGH?
+//TODO: Implement menu in editing screen NOT NEEDED?
 // Thomas
 
 
