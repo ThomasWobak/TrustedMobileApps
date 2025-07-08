@@ -24,6 +24,7 @@ fun WaveformViewEditing(
     selectedVisualBlockIndices: Set<Int>,
     visibleBlocks: List<WavBlockProtos.WavBlock>,
     maxAmplitude: Int,
+    startTimeOffsetSeconds: Float = 0f,
     blockDurationSeconds: Float = InputStreamReader.BLOCK_TIME, //Current Block size to time ratio
     onBarRangeSelect: (startBar: Int, endBar: Int) -> Unit
 )
@@ -125,11 +126,12 @@ fun WaveformViewEditing(
 
          repeat(markerCount + 1) { i ->
              Text(
-                 text = "${(i * secondsPerMarker).toInt()}s",
+                 text = "${(startTimeOffsetSeconds + i * secondsPerMarker).toInt()}s",
                  modifier = Modifier.weight(1f),
                  style = MaterialTheme.typography.labelSmall
              )
          }
      }
+
 
  }

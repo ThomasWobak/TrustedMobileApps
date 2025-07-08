@@ -24,6 +24,7 @@ import com.example.mobileappstrusted.audio.MetadataCollector.extractMetaDataFrom
 import com.example.mobileappstrusted.audio.EditScriptUtils.getDeviceId
 import com.example.mobileappstrusted.audio.EditScriptUtils.getDeviceName
 import com.example.mobileappstrusted.audio.EditScriptUtils.undoLastEdit
+import com.example.mobileappstrusted.audio.InputStreamReader
 import com.example.mobileappstrusted.audio.WavUtils.writeBlocksToTempFile
 import com.example.mobileappstrusted.audio.WavUtils.writeWavFileToPersistentStorage
 import com.example.mobileappstrusted.components.NoPathGivenScreen
@@ -347,15 +348,23 @@ fun EditAudioScreen(filePath: String) {
         }
 
         if (selectedAmplitudes.isNotEmpty()) {
+
             Spacer(Modifier.height(24.dp))
             Text("Preview of Selected Blocks", style = MaterialTheme.typography.headlineSmall)
+            val previewBlocks = visibleBlocks.filter { selectedBlockIndices.contains(it.currentIndex) }
+            val previewStartTime = previewBlocks.minOfOrNull { it.currentIndex }?.times(
+                InputStreamReader.BLOCK_TIME) ?: 0f
+
             WaveformViewEditing(
                 amplitudes = selectedAmplitudes,
                 selectedVisualBlockIndices = emptySet(),
-                visibleBlocks = emptyList(),
+                visibleBlocks = previewBlocks,
                 maxAmplitude = maxAmplitude,
+                startTimeOffsetSeconds = previewStartTime, // <-- NEW
                 onBarRangeSelect = { _, _ -> }
             )
+
+
             Spacer(Modifier.height(8.dp))
             Button(onClick = {
                 if (!isPlayingSelected) {
