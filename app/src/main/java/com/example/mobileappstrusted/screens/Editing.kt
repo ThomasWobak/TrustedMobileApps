@@ -128,6 +128,18 @@ fun EditAudioScreen(filePath: String) {
             }
         }
     }
+    //should probably be exported to WavUtils but this is easier for now.
+    fun regenerateWaveformFromVisibleBlocks() {
+        val hdr = wavHeader ?: return
+        val visible = blocks.filterNot { deletedBlockIndices.contains(it.originalIndex) }
+        playbackFile = writeBlocksToTempFile(context, hdr, visible)
+        amplitudes = extractAmplitudesFromWav(playbackFile!!)
+        maxAmplitude = amplitudes.maxOrNull()?.coerceAtLeast(1) ?: 1
+        mediaPlayer.reset()
+        mediaPlayer.setDataSource(playbackFile!!.absolutePath)
+        mediaPlayer.prepare()
+    }
+
 
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)
@@ -217,7 +229,9 @@ fun EditAudioScreen(filePath: String) {
                                 .putDetails("blockIndex", idx.toString())
                                 .build()
                             editHistoryEntries.add(entry)
+
                         }
+                        regenerateWaveformFromVisibleBlocks()
                     }
                 }) { Text("Mark as Deleted") }
 
@@ -239,6 +253,7 @@ fun EditAudioScreen(filePath: String) {
                                 blk.toBuilder().setCurrentIndex(i).build()
                             }.toMutableList()
                             blocks = sorted
+
                             reorderText = ""
                             insertAtText = ""
                             blocksToMove.forEach { blk ->
@@ -252,6 +267,7 @@ fun EditAudioScreen(filePath: String) {
                                     .build()
                                 editHistoryEntries.add(entry)
                             }
+                            regenerateWaveformFromVisibleBlocks()
                         }
                     }
                 }) { Text("Apply Reorder") }
@@ -268,7 +284,7 @@ fun EditAudioScreen(filePath: String) {
                         deletedBlockIndices = newDeleted
                         editHistoryEntries.clear()
                         editHistoryEntries.addAll(newHistory.entriesList)
-
+                        regenerateWaveformFromVisibleBlocks()
 
                         Toast.makeText(context, "Last state restored from edit history", Toast.LENGTH_SHORT).show()
                     },
@@ -380,4 +396,7 @@ fun EditAudioScreen(filePath: String) {
             }
         }
     }
+
+
 }
+
