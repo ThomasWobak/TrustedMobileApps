@@ -1,8 +1,8 @@
 package com.example.mobileappstrusted.audio
 
 import android.util.Log
-import com.example.mobileappstrusted.cryptography.ORIGINAL_MERKLE_ROOT_HASH_CHUNK_IDENTIFIER
 import com.example.mobileappstrusted.protobuf.OmrhBlockProtos
+import com.example.mobileappstrusted.protobuf.SignatureBlockProto
 import com.example.mobileappstrusted.protobuf.WavBlockProtos
 import java.io.ByteArrayInputStream
 import java.io.File
@@ -114,6 +114,41 @@ object InputStreamReader {
         }
 
         Log.w("AudioDebug", "No 'omrh' block found.")
+        return null
+    }
+
+    fun extractDigitalSignatureBlockFromWav(file: File): SignatureBlockProto.SignatureBlock? {
+        val input = file.inputStream().buffered()
+        input.skip(12) // Skip RIFF header
+
+        val targetIdBytes = DIGITAL_SIGNATURE_HASH_CHUNK_IDENTIFIER.toByteArray(Charsets.US_ASCII)
+
+        while (true) {
+            val idBytes = ByteArray(4)
+            val sizeBytes = ByteArray(4)
+
+            if (input.read(idBytes) != 4 || input.read(sizeBytes) != 4) break
+
+            val chunkSize = ByteBuffer.wrap(sizeBytes).order(ByteOrder.LITTLE_ENDIAN).int
+
+            if (idBytes.contentEquals(targetIdBytes)) {
+                return try {
+                    SignatureBlockProto.SignatureBlock.parseDelimitedFrom(input)
+                } catch (e: Exception) {
+                    Log.w("AudioDebug", "dsig block invalid: ${e.message}")
+                    null
+                }
+            } else {
+                try {
+                    skipFully(input, chunkSize.toLong())
+                } catch (e: Exception) {
+                    Log.w("AudioDebug", "Failed to skip chunk: ${e.message}")
+                    break
+                }
+            }
+        }
+
+        Log.w("AudioDebug", "No 'dsig' block found.")
         return null
     }
 

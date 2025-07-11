@@ -7,7 +7,6 @@ import com.example.mobileappstrusted.protobuf.WavBlockProtos
 import java.io.File
 import java.security.MessageDigest
 
-const val ORIGINAL_MERKLE_ROOT_HASH_CHUNK_IDENTIFIER = "omrh"
 
 object MerkleHasher {
 
@@ -59,13 +58,7 @@ object MerkleHasher {
         val sortedBlocks = blocks
             .sortedBy { it.originalIndex }
 
-        /*
-        sortedBlocks.forEachIndexed { index, block ->
-            val pcmData = block.pcmData.toByteArray()
-            Log.i("AudioDebug", "Block ${block.originalIndex},${block.currentIndex}, $index  pcmData (${pcmData.size} bytes): ${pcmData.joinToString(", ") { it.toString() }}")
-        } */
         val recomputedRoot = buildMerkleRoot(sortedBlocks)
-        Log.i("AudioDebug", "Original: ${omrhHash.originalRootHash.toByteArray().toHexString()}, recomputed: ${recomputedRoot.toHexString()}")
 
         val matches = omrhHash.originalRootHash.toByteArray().contentEquals(recomputedRoot)
 
@@ -77,8 +70,5 @@ object MerkleHasher {
 
         return matches
     }
-
-    private fun ByteArray.toHexString(): String =
-        joinToString(" ") { "%02x".format(it) }
 
 }
