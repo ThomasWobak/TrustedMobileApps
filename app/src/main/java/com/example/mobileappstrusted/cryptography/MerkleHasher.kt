@@ -40,8 +40,6 @@ object MerkleHasher {
             }
         }
 
-        Log.i("AudioDebug", "Building merkle root: $currentLevel")
-
         return currentLevel.first()
     }
 

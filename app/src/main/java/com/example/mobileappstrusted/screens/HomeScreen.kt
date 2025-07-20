@@ -21,7 +21,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import com.example.mobileappstrusted.cryptography.DigitalSignatureUtils.isPrivateKeyStored
-import com.example.mobileappstrusted.cryptography.DigitalSignatureUtils.storePrivateKey
+import com.example.mobileappstrusted.cryptography.DigitalSignatureUtils.storeKeyPairFromFile
 import com.example.mobileappstrusted.navigation.NavScreen
 
 @Composable
@@ -39,11 +39,10 @@ fun HomeScreen(navController: NavHostController) {
     ) { uri: Uri? ->
         uri?.let {
             val fileName = getFileNameFromUri(context, it)
-            if (fileName.endsWith(".pem", ignoreCase = true) || fileName.endsWith(".key", ignoreCase = true)) {
+            if (fileName.endsWith(".asc", ignoreCase = true) || fileName.endsWith(".pgp", ignoreCase = true)) {
                 try {
                     context.contentResolver.openInputStream(uri)?.use { inputStream ->
-                        val pemBytes = inputStream.readBytes()
-                        storePrivateKey(context, pemBytes)
+                        storeKeyPairFromFile(context, inputStream)
                         Toast.makeText(context, "Private key stored securely.", Toast.LENGTH_SHORT).show()
                     }
                 } catch (e: Exception) {

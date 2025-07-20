@@ -47,6 +47,7 @@ import com.example.mobileappstrusted.audio.WavUtils.writeBlocksToTempFile
 import com.example.mobileappstrusted.audio.WavUtils.writeWavFileToPersistentStorage
 import com.example.mobileappstrusted.components.NoPathGivenScreen
 import com.example.mobileappstrusted.components.WaveformView
+import com.example.mobileappstrusted.cryptography.DigitalSignatureUtils.verifyDigitalSignatureFromWav
 import com.example.mobileappstrusted.cryptography.MerkleHasher
 import com.example.mobileappstrusted.protobuf.EditHistoryProto
 import com.example.mobileappstrusted.protobuf.RecordingMetadataProto
@@ -132,7 +133,7 @@ fun EditAudioScreen(filePath: String) {
                         .addAllEntries(editHistoryEntries)
                         .build()
 
-                    writeWavFileToPersistentStorage(outStream, blocksToExport, merkleRoot, editHistory, metaData)
+                    writeWavFileToPersistentStorage(context, outStream, blocksToExport, merkleRoot, editHistory, metaData)
 
                     Toast.makeText(context, "Audio exported to Music/$fileName", Toast.LENGTH_LONG).show()
                 }
@@ -176,8 +177,10 @@ fun EditAudioScreen(filePath: String) {
         }
 
         if (!verificationChecked && f.exists() && isWav) {
-            isOriginal = MerkleHasher.verifyWavMerkleRoot(f)
             verificationChecked = true
+            val merkleRootMatches = MerkleHasher.verifyWavMerkleRoot(f)
+            val digitalSignatureMatches = verifyDigitalSignatureFromWav(context, f)
+            isOriginal = merkleRootMatches && digitalSignatureMatches
         }
     }
 

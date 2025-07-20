@@ -1,6 +1,5 @@
 package com.example.mobileappstrusted.audio
 
-import android.util.Log
 import com.example.mobileappstrusted.protobuf.EditHistoryProto
 import com.example.mobileappstrusted.protobuf.OmrhBlockProtos
 import com.example.mobileappstrusted.protobuf.RecordingMetadataProto
@@ -24,7 +23,6 @@ object OutputStreamWriter {
     ) {
         blocks.forEach { block ->
             block.writeDelimitedTo(outputStream)
-            Log.d("AudioDebug", "Wrote Block")
         }
     }
 
@@ -146,7 +144,11 @@ object OutputStreamWriter {
             val blockBytes = signature.toByteArray()
             val prefixSize = CodedOutputStream.computeUInt32SizeNoTag(blockBytes.size)
 
-        val sizeBytes = prefixSize + blockBytes.size
+        val sizeBytes = ByteBuffer
+            .allocate(4)
+            .order(ByteOrder.LITTLE_ENDIAN)
+            .putInt(blockBytes.size)
+            .array()
 
         outputStream.write(chunkId)     // 4 bytes: 'dsig'
         outputStream.write(sizeBytes)   // 4 bytes: chunk size

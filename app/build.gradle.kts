@@ -45,7 +45,10 @@ android {
     }
     packaging {
         resources {
-            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += setOf(
+                "META-INF/versions/9/OSGI-INF/MANIFEST.MF",
+                "/META-INF/{AL2.0,LGPL2.1}"
+            )
         }
     }
     sourceSets["main"].java.srcDirs(
@@ -80,8 +83,8 @@ dependencies {
     implementation(libs.androidx.material3)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.protobuf.java)
-    implementation(libs.bouncycastle.bcprov)
-    implementation(libs.bouncycastle.bcpkix)
+    implementation(libs.pgpainless.core)
+    implementation (libs.pgpainless.sop)
     implementation(libs.securitycrypto)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

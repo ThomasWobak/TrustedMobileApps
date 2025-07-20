@@ -43,12 +43,10 @@ object InputStreamReader {
                     ?: break  // End of stream
 
                 if (block.pcmData.isEmpty) {
-                    Log.d("AudioDebug", "Empty PCM data found, treating as invalid.")
                     throw IllegalArgumentException("Empty block encountered")
                 }
 
                 blocks.add(block)
-                Log.d("AudioDebug", "Parsed delimited block, PCM size: ${block.pcmData.size()}")
             }
 
             return blocks
@@ -57,7 +55,6 @@ object InputStreamReader {
         }
 
         // Fallback: treat as raw PCM
-        Log.d("AudioDebug", "Falling back to raw PCM mode")
         var offset = 0
         var index = 0
         while (offset < data.size) {
