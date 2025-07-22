@@ -1,10 +1,11 @@
 package com.example.mobileappstrusted.cryptography
 
-import android.util.Log
 import com.example.mobileappstrusted.cryptography.MerkleHasher.getEncryptionMessageDigest
 import com.example.mobileappstrusted.protobuf.WavBlockProtos
+import com.google.protobuf.ByteString
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
+import kotlin.experimental.xor
 
 object WavBlockEncryptor {
 
@@ -24,29 +25,31 @@ object WavBlockEncryptor {
         blocks: List<WavBlockProtos.WavBlock>,
         password: String
     ): List<WavBlockProtos.WavBlock> {
+        val digest = getEncryptionMessageDigest()
+        var chainingValue = digest.digest(password.toByteArray(Charsets.UTF_8))
+
         return blocks.map { block ->
             if (block.isDeleted && !block.isEncrypted) {
                 val pcmData = block.pcmData.toByteArray()
-                var undeletedHash = if (block.undeletedHash != null && !block.undeletedHash.isEmpty) block.undeletedHash.toByteArray() else null
 
-                val matches = undeletedHash?.let {
-                    getEncryptionMessageDigest().digest(pcmData).contentEquals(it)
-                } ?: false
+                val undeletedHash = MerkleHasher.hashChunk(pcmData)
 
-                if (!matches) {
-                    undeletedHash = MerkleHasher.hashChunk(pcmData)
+                val chainedInput = ByteArray(pcmData.size) { i ->
+                    pcmData[i].xor(chainingValue[i % chainingValue.size])
                 }
-                Log.i("AudioDebug", "Matches: $matches, unencrypted")
 
-                val encrypted = encrypt(pcmData, password)
-                    return@map block.toBuilder()
-                        .setPcmData(com.google.protobuf.ByteString.copyFrom(encrypted))
-                        .setUndeletedHash(com.google.protobuf.ByteString.copyFrom(undeletedHash))
-                        .setIsEncrypted(true)
-                        .build()
+                val encrypted = encrypt(chainedInput, password)
 
+                chainingValue = digest.digest(encrypted)
+
+                return@map block.toBuilder()
+                    .setPcmData(ByteString.copyFrom(encrypted))
+                    .setUndeletedHash(ByteString.copyFrom(undeletedHash))
+                    .setIsEncrypted(true)
+                    .build()
             }
-            block // unchanged if not deleted
+
+            block // leave unchanged if not marked deleted
         }
     }
 }

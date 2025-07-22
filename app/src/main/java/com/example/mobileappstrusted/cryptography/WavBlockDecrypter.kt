@@ -5,6 +5,7 @@ import com.example.mobileappstrusted.protobuf.WavBlockProtos
 import com.google.protobuf.ByteString
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
+import kotlin.experimental.xor
 
 object WavBlockDecrypter {
 
@@ -24,6 +25,9 @@ object WavBlockDecrypter {
         blocks: List<WavBlockProtos.WavBlock>,
         password: String
     ): List<WavBlockProtos.WavBlock>? {
+        val digest = getEncryptionMessageDigest()
+        var chainingValue = digest.digest(password.toByteArray(Charsets.UTF_8)) // Initial chaining value from password
+
         return try {
             blocks.map { block ->
                 if (block.isEncrypted) {
@@ -31,19 +35,29 @@ object WavBlockDecrypter {
                         return null
                     }
 
-                    val decryptedPcm = decrypt(block.pcmData.toByteArray(), password)
+                    val decryptedChained = decrypt(block.pcmData.toByteArray(), password)
 
-                    val actualHash = getEncryptionMessageDigest().digest(decryptedPcm)
+                    // Reverse XOR to recover original PCM
+                    val originalPcm = ByteArray(decryptedChained.size) { i ->
+                        decryptedChained[i].xor(chainingValue[i % chainingValue.size])
+                    }
+
+                    // Verify hash
+                    val actualHash = digest.digest(originalPcm)
                     val expectedHash = block.undeletedHash.toByteArray()
 
                     if (!actualHash.contentEquals(expectedHash)) {
                         return null
                     }
 
+                    // Update chaining value for next block
+                    chainingValue = digest.digest(block.pcmData.toByteArray())
+
                     block.toBuilder()
-                        .setPcmData(ByteString.copyFrom(decryptedPcm))
+                        .setPcmData(ByteString.copyFrom(originalPcm))
                         .setIsDeleted(false)
                         .clearUndeletedHash()
+                        .setIsEncrypted(false)
                         .build()
                 } else {
                     block
@@ -53,5 +67,4 @@ object WavBlockDecrypter {
             null
         }
     }
-
 }
