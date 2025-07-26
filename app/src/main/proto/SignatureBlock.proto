@@ -5,7 +5,7 @@ option java_outer_classname = "SignatureBlockProto"; //
 
 message SignatureBlock {
     bytes digital_signature = 1;
-    string public_key_id = 2;
+    bytes public_key = 2;
     string signature_algorithm = 3;
     int64 timestamp = 4;
     string signer_identity = 5;

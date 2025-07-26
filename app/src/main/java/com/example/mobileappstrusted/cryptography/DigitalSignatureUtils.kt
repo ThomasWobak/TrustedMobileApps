@@ -20,7 +20,8 @@ import java.nio.ByteOrder
 
 object DigitalSignatureUtils {
 
-    fun signData(data: ByteArray, privateKey: ByteArray): ByteArray {
+    fun signData(data: ByteArray, context: Context): ByteArray {
+        val privateKey = loadPrivateKeyFromPrefs(context)
         val sop: SOP = SOPImpl()
         val result = sop.detachedSign()
             .key(ByteArrayInputStream(privateKey))
@@ -29,11 +30,11 @@ object DigitalSignatureUtils {
         return result.bytes
     }
 
-    // 2️⃣ VERIFY SIGNATURE
     fun verifySignature(data: ByteArray, signatureBytes: ByteArray, publicKeyBytes: ByteArray): Boolean {
         val publicKeyRing = try {
             PGPainless.readKeyRing().publicKeyRing(ByteArrayInputStream(publicKeyBytes))
         } catch (e: Exception) {
+            Log.i("AudioDebug", "Couldnt read key")
             return false
         }
 
@@ -52,6 +53,7 @@ object DigitalSignatureUtils {
             } else false
             true
         } catch (_: Exception) {
+            Log.i("AudioDebug", "Verification didnt work")
             false
         }
     }
@@ -67,14 +69,13 @@ object DigitalSignatureUtils {
             buffer.toByteArray()
         }
     }
-    fun verifyDigitalSignatureFromWav(context: Context, file: File): Boolean {
+    @OptIn(ExperimentalStdlibApi::class)
+    fun verifyDigitalSignatureFromWav(file: File): Boolean {
         val fullBytes = file.readBytes()
         val dsig = extractDigitalSignatureBlockFromWav(file) ?: return false
         val cleaned = removeSignatureChunk(fullBytes)
 
-        val publicKeyBytes = loadPublicKeyFromPrefs(context) ?: return false
-
-        Log.i("AudioDebug", "Got to actual verificationStep")
+        val publicKeyBytes = dsig.publicKey.toByteArray() ?: return false
 
         return verifySignature(cleaned, dsig.digitalSignature.toByteArray(), publicKeyBytes)
     }

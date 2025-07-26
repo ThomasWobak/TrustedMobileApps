@@ -1,6 +1,7 @@
 package com.example.mobileappstrusted.audio
 
 import android.content.Context
+import android.util.Log
 import com.example.mobileappstrusted.audio.InputStreamReader.chunkRawPcm
 import com.example.mobileappstrusted.audio.OutputStreamWriter.writeEditHistoryChunkToStream
 import com.example.mobileappstrusted.audio.OutputStreamWriter.writeMerkleRootChunkToStream
@@ -19,6 +20,7 @@ import com.google.protobuf.CodedOutputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.OutputStream
+import kotlin.io.encoding.ExperimentalEncodingApi
 import kotlin.math.abs
 
 object WavUtils {
@@ -106,6 +108,7 @@ object WavUtils {
         b[offset + 1] = ((value.toInt() shr 8) and 0xff).toByte()
     }
 
+    @OptIn(ExperimentalEncodingApi::class, ExperimentalStdlibApi::class)
     fun writeWavFileToPersistentStorage(
         context: Context,
         outputStream: OutputStream,
@@ -114,7 +117,6 @@ object WavUtils {
         editHistory: EditHistoryProto.EditHistory,
         metaData: RecordingMetadataProto.RecordingMetadata
     ) {
-        // Step 1: Write all WAV data to a temporary buffer
         val tempBuffer = ByteArrayOutputStream()
 
         val dataBlocksSize = blocks.sumOf { block ->
@@ -141,17 +143,16 @@ object WavUtils {
 
         val wavBytes = tempBuffer.toByteArray()
 
-// 2. Try signing and building SignatureBlock
         val signatureBlock: SignatureBlockProto.SignatureBlock? = if (DigitalSignatureUtils.isPrivateKeyStored(context)) {
             try {
-                val privateKey = DigitalSignatureUtils.loadPrivateKeyFromPrefs(context)!!
-                val publicKeyId = DigitalSignatureUtils.loadPublicKeyIdFromPrefs(context)!!
 
-                val signature = DigitalSignatureUtils.signData(wavBytes, privateKey)
+                val publicKey = DigitalSignatureUtils.loadPublicKeyFromPrefs(context)!!
+
+                val signature = DigitalSignatureUtils.signData(wavBytes, context)
 
                 SignatureBlockProto.SignatureBlock.newBuilder()
                     .setDigitalSignature(ByteString.copyFrom(signature))
-                    .setPublicKeyId(publicKeyId)
+                    .setPublicKey(ByteString.copyFrom(publicKey))
                     .setSignatureAlgorithm("SHA256withRSA")
                     .setTimestamp(System.currentTimeMillis())
                     .setSignerIdentity(metaData.deviceId)
@@ -162,10 +163,8 @@ object WavUtils {
             }
         } else null
 
-// 3. Write data to output stream
         outputStream.write(wavBytes)
 
-// 4. Append signature block if available
         signatureBlock?.let {
             writeSignatureChunkToStream(outputStream, it)
         }

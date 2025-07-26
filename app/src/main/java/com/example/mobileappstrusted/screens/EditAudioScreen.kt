@@ -179,7 +179,7 @@ fun EditAudioScreen(filePath: String) {
         if (!verificationChecked && f.exists() && isWav) {
             verificationChecked = true
             val merkleRootMatches = MerkleHasher.verifyWavMerkleRoot(f)
-            val digitalSignatureMatches = verifyDigitalSignatureFromWav(context, f)
+            val digitalSignatureMatches = verifyDigitalSignatureFromWav(f)
             isOriginal = merkleRootMatches && digitalSignatureMatches
         }
     }
