@@ -5,6 +5,7 @@ import com.example.mobileappstrusted.protobuf.WavBlockProtos
 import com.google.protobuf.ByteString
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
+import kotlin.experimental.xor
 
 object WavBlockDecrypter {
 
@@ -23,30 +24,47 @@ object WavBlockDecrypter {
     fun decryptDeletedBlocksWithPassword(
         blocks: List<WavBlockProtos.WavBlock>,
         password: String
-    ): List<WavBlockProtos.WavBlock> {
-        return blocks.map { block ->
-            if (block.isDeleted) {
-                if (block.undeletedHash == null || block.undeletedHash.isEmpty) {
-                    throw IllegalStateException("Missing undeleted_hash for deleted block at index ${block.originalIndex}")
+    ): List<WavBlockProtos.WavBlock>? {
+        val digest = getEncryptionMessageDigest()
+        var chainingValue = digest.digest(password.toByteArray(Charsets.UTF_8)) // Initial chaining value from password
+
+        return try {
+            blocks.map { block ->
+                if (block.isEncrypted) {
+                    if (block.undeletedHash == null || block.undeletedHash.isEmpty) {
+                        return null
+                    }
+
+                    val decryptedChained = decrypt(block.pcmData.toByteArray(), password)
+
+                    // Reverse XOR to recover original PCM
+                    val originalPcm = ByteArray(decryptedChained.size) { i ->
+                        decryptedChained[i].xor(chainingValue[i % chainingValue.size])
+                    }
+
+                    // Verify hash
+                    val actualHash = digest.digest(originalPcm)
+                    val expectedHash = block.undeletedHash.toByteArray()
+
+                    if (!actualHash.contentEquals(expectedHash)) {
+                        return null
+                    }
+
+                    // Update chaining value for next block
+                    chainingValue = digest.digest(block.pcmData.toByteArray())
+
+                    block.toBuilder()
+                        .setPcmData(ByteString.copyFrom(originalPcm))
+                        .setIsDeleted(false)
+                        .clearUndeletedHash()
+                        .setIsEncrypted(false)
+                        .build()
+                } else {
+                    block
                 }
-
-                val decryptedPcm = decrypt(block.pcmData.toByteArray(), password)
-
-                val actualHash = getEncryptionMessageDigest().digest(decryptedPcm)
-                val expectedHash = block.undeletedHash.toByteArray()
-
-                if (!actualHash.contentEquals(expectedHash)) {
-                    throw IllegalStateException("Decrypted PCM does not match undeleted_hash for block at index ${block.originalIndex}")
-                }
-
-                return@map block.toBuilder()
-                    .setPcmData(ByteString.copyFrom(decryptedPcm))
-                    .setIsDeleted(false)
-                    .clearUndeletedHash()
-                    .build()
             }
-
-            block // unchanged if not deleted
+        } catch (e: Exception) {
+            null
         }
     }
 }

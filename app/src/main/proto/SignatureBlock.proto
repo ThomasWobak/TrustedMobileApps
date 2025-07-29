@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+option java_package = "com.example.mobileappstrusted.protobuf";
+option java_outer_classname = "SignatureBlockProto"; //
+
+message SignatureBlock {
+    bytes digital_signature = 1;
+    bytes public_key = 2;
+    string signature_algorithm = 3;
+    int64 timestamp = 4;
+    string signer_identity = 5;
+}

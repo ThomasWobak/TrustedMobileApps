@@ -1,16 +1,19 @@
 package com.example.mobileappstrusted.audio
 
-import android.util.Log
-import com.example.mobileappstrusted.cryptography.ORIGINAL_MERKLE_ROOT_HASH_CHUNK_IDENTIFIER
 import com.example.mobileappstrusted.protobuf.EditHistoryProto
 import com.example.mobileappstrusted.protobuf.OmrhBlockProtos
 import com.example.mobileappstrusted.protobuf.RecordingMetadataProto
+import com.example.mobileappstrusted.protobuf.SignatureBlockProto
 import com.example.mobileappstrusted.protobuf.WavBlockProtos
 import com.google.protobuf.ByteString
+import com.google.protobuf.CodedOutputStream
 import java.io.ByteArrayOutputStream
 import java.io.OutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+
+const val ORIGINAL_MERKLE_ROOT_HASH_CHUNK_IDENTIFIER = "omrh"
+const val DIGITAL_SIGNATURE_HASH_CHUNK_IDENTIFIER = "dsig"
 
 object OutputStreamWriter {
 
@@ -20,7 +23,6 @@ object OutputStreamWriter {
     ) {
         blocks.forEach { block ->
             block.writeDelimitedTo(outputStream)
-            Log.d("AudioDebug", "Wrote Block")
         }
     }
 
@@ -136,6 +138,20 @@ object OutputStreamWriter {
         outputStream.write(header)
     }
 
+    fun writeSignatureChunkToStream(outputStream: OutputStream, signature: SignatureBlockProto.SignatureBlock) {
+        val chunkId = DIGITAL_SIGNATURE_HASH_CHUNK_IDENTIFIER.toByteArray(Charsets.US_ASCII)
 
+            val blockBytes = signature.toByteArray()
+            val prefixSize = CodedOutputStream.computeUInt32SizeNoTag(blockBytes.size)
 
+        val sizeBytes = ByteBuffer
+            .allocate(4)
+            .order(ByteOrder.LITTLE_ENDIAN)
+            .putInt(blockBytes.size)
+            .array()
+
+        outputStream.write(chunkId)     // 4 bytes: 'dsig'
+        outputStream.write(sizeBytes)   // 4 bytes: chunk size
+        signature.writeDelimitedTo(outputStream) // actual data
+    }
 }
