@@ -9,6 +9,7 @@ object WavCutter {
 
                     val undeletedHash = MerkleHasher.hashChunk(block.pcmData.toByteArray())
                    return  block.toBuilder()
+                       .setPcmData(block.pcmData)
                         .setIsDeleted(true)
                         .setUndeletedHash(com.google.protobuf.ByteString.copyFrom(undeletedHash))
                         .build()

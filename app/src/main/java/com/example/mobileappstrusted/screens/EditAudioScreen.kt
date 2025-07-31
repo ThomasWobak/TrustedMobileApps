@@ -75,7 +75,8 @@ fun EditAudioScreen(filePath: String) {
     val mediaPlayer = remember { MediaPlayer() }
     var isPlaying by remember { mutableStateOf(false) }
 
-    var isOriginal by remember { mutableStateOf<Boolean?>(null) }
+    var digitalSignatureMatches by remember { mutableStateOf<Boolean?>(null) }
+    var merkleRootMatches by remember { mutableStateOf<Boolean?>(null) }
     var verificationChecked by remember { mutableStateOf(false) }
 
     var reorderFromText by remember { mutableStateOf("") }
@@ -154,7 +155,7 @@ fun EditAudioScreen(filePath: String) {
             val (hdr, blks) = splitWavIntoBlocks(f)
             wavHeader = hdr
             blocks = blks
-            deletedBlockIndices = emptySet()
+            deletedBlockIndices = blks.filter { it.isDeleted }.map { it.originalIndex }.toSet()
             val visibleBlocks = blks.filterNot { deletedBlockIndices.contains(it.originalIndex) }
             playbackFile = writeBlocksToTempFile(context, hdr, visibleBlocks)
             amplitudes = extractAmplitudesFromWav(playbackFile!!)
@@ -178,9 +179,8 @@ fun EditAudioScreen(filePath: String) {
 
         if (!verificationChecked && f.exists() && isWav) {
             verificationChecked = true
-            val merkleRootMatches = MerkleHasher.verifyWavMerkleRoot(f)
-            val digitalSignatureMatches = verifyDigitalSignatureFromWav(f)
-            isOriginal = merkleRootMatches && digitalSignatureMatches
+            merkleRootMatches = MerkleHasher.verifyWavMerkleRoot(f)
+            digitalSignatureMatches = verifyDigitalSignatureFromWav(f)
         }
     }
 
@@ -206,9 +206,14 @@ fun EditAudioScreen(filePath: String) {
             .verticalScroll(rememberScrollState())
             .padding(16.dp)
     ) {
-        when (isOriginal) {
-            true -> Text("\u2714\uFE0F Verified", color = MaterialTheme.colorScheme.primary)
-            false -> Text("\u274C Not Verified", color = MaterialTheme.colorScheme.error)
+        when (digitalSignatureMatches) {
+            true -> Text("\u2714\uFE0F Digital Signature Matches", color = MaterialTheme.colorScheme.primary)
+            false -> Text("\u274C Not Verified by Digital Signature", color = MaterialTheme.colorScheme.error)
+            null -> {}
+        }
+        when (merkleRootMatches) {
+            true -> Text("\u2714\uFE0F Root hash matches", color = MaterialTheme.colorScheme.primary)
+            false -> Text("\u274C Root hash does not match", color = MaterialTheme.colorScheme.error)
             null -> {}
         }
 

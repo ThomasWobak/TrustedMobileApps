@@ -46,6 +46,7 @@ object WavBlockEncryptor {
                     .setPcmData(ByteString.copyFrom(encrypted))
                     .setUndeletedHash(ByteString.copyFrom(undeletedHash))
                     .setIsEncrypted(true)
+                    .setIsDeleted(true)
                     .build()
             }
 
