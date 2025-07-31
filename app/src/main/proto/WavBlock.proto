@@ -9,4 +9,5 @@ message WavBlock {
   bool is_deleted = 3;
   bytes undeleted_hash = 4;
   bytes pcm_data = 5;
+  bool is_encrypted = 6;
 }

@@ -1,17 +1,23 @@
 package com.example.mobileappstrusted.audio
 
 import android.content.Context
+import android.util.Log
 import com.example.mobileappstrusted.audio.InputStreamReader.chunkRawPcm
 import com.example.mobileappstrusted.audio.OutputStreamWriter.writeEditHistoryChunkToStream
 import com.example.mobileappstrusted.audio.OutputStreamWriter.writeMerkleRootChunkToStream
 import com.example.mobileappstrusted.audio.OutputStreamWriter.writeMetaDataChunkToStream
+import com.example.mobileappstrusted.audio.OutputStreamWriter.writeSignatureChunkToStream
 import com.example.mobileappstrusted.audio.OutputStreamWriter.writeWavBlocksToStream
 import com.example.mobileappstrusted.audio.OutputStreamWriter.writeWavHeaderToStream
+import com.example.mobileappstrusted.cryptography.DigitalSignatureUtils
 import com.example.mobileappstrusted.cryptography.MerkleHasher
 import com.example.mobileappstrusted.protobuf.EditHistoryProto
 import com.example.mobileappstrusted.protobuf.RecordingMetadataProto
+import com.example.mobileappstrusted.protobuf.SignatureBlockProto
 import com.example.mobileappstrusted.protobuf.WavBlockProtos
+import com.google.protobuf.ByteString
 import com.google.protobuf.CodedOutputStream
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.OutputStream
 import kotlin.math.abs
@@ -73,7 +79,7 @@ object WavUtils {
             writeWavHeaderToStream( pcmDataSize = dataBlocksSize,
                 merkleChunkSize = 35,
                 editHistorySize = 0,
-                metaDataSize= metadata.toByteArray().size,
+                metaDataSize= metadata.toByteArray().size, 0,
                 outputStream)
 
             writeWavBlocksToStream(outputStream, blocks)
@@ -102,12 +108,15 @@ object WavUtils {
     }
 
     fun writeWavFileToPersistentStorage(
+        context: Context,
         outputStream: OutputStream,
         blocks: List<WavBlockProtos.WavBlock>,
         merkleRoot: ByteArray,
         editHistory: EditHistoryProto.EditHistory,
         metaData: RecordingMetadataProto.RecordingMetadata
     ) {
+        val tempBuffer = ByteArrayOutputStream()
+
         val dataBlocksSize = blocks.sumOf { block ->
             val blockBytes = block.toByteArray()
             val prefixSize = CodedOutputStream.computeUInt32SizeNoTag(blockBytes.size)
@@ -115,24 +124,59 @@ object WavUtils {
         }
 
         val editHistorySize = editHistory.toByteArray().size
-        val metaDataSize= metaData.toByteArray().size
+        val metaDataSize = metaData.toByteArray().size
 
-        writeWavHeaderToStream( pcmDataSize = dataBlocksSize,
+        var digitalSignatureBlockSize = 0
+        if (DigitalSignatureUtils.isPrivateKeyStored(context)){
+            val prefixSize = CodedOutputStream.computeUInt32SizeNoTag(833)
+            digitalSignatureBlockSize = 833 + prefixSize
+        }
+
+        writeWavHeaderToStream(
+            pcmDataSize = dataBlocksSize,
             merkleChunkSize = 35,
             editHistorySize = editHistorySize,
-            metaDataSize= metaDataSize,
-            outputStream)
+            metaDataSize = metaDataSize,
+            signatureSize = digitalSignatureBlockSize,
+            outputStream = tempBuffer
+        )
 
-        writeWavBlocksToStream(outputStream, blocks)
-        writeMerkleRootChunkToStream(outputStream, merkleRoot)
-        writeEditHistoryChunkToStream(outputStream, editHistory)
-        writeMetaDataChunkToStream(outputStream, metaData)
+        writeWavBlocksToStream(tempBuffer, blocks)
+        writeMerkleRootChunkToStream(tempBuffer, merkleRoot)
+        writeEditHistoryChunkToStream(tempBuffer, editHistory)
+        writeMetaDataChunkToStream(tempBuffer, metaData)
 
-        // Write audio blocks
-        blocks.sortedBy { it.currentIndex }.forEach { block ->
-            outputStream.write(block.toByteArray())
+        val wavBytes = tempBuffer.toByteArray()
+
+        val signatureBlock: SignatureBlockProto.SignatureBlock? = if (DigitalSignatureUtils.isPrivateKeyStored(context)) {
+            try {
+
+                val publicKey = DigitalSignatureUtils.loadPublicKeyFromPrefs(context)!!
+
+                val signature = DigitalSignatureUtils.signData(wavBytes, context)
+
+                Log.i("AudioDebug", "Length of digital signature: " + signature.size)
+
+                SignatureBlockProto.SignatureBlock.newBuilder()
+                    .setDigitalSignature(ByteString.copyFrom(signature))
+                    .setPublicKey(ByteString.copyFrom(publicKey))
+                    .setSignatureAlgorithm("SHA256withRSA")
+                    .setTimestamp(System.currentTimeMillis())
+                    .setSignerIdentity(metaData.deviceId)
+                    .build()
+            } catch (e: Exception) {
+                e.printStackTrace()
+                null
+            }
+        } else null
+
+        outputStream.write(wavBytes)
+
+        signatureBlock?.let {
+            writeSignatureChunkToStream(outputStream, it)
         }
     }
+
     fun writeWavToTemporaryStorage(pcmData: ByteArray, outputFile: File) {
         val blocks = chunkRawPcm(pcmData)
         val merkleRoot = MerkleHasher.buildMerkleRoot(blocks)
@@ -148,6 +192,7 @@ object WavUtils {
                 merkleChunkSize = 35,
                 editHistorySize = 0,
                 metaDataSize = 0,
+                signatureSize = 0,
                 outputStream)
 
             writeWavBlocksToStream(outputStream, blocks)

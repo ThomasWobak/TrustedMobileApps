@@ -34,19 +34,20 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import com.example.mobileappstrusted.audio.InputStreamReader.splitWavIntoBlocks
-import com.example.mobileappstrusted.audio.WavUtils.extractAmplitudesFromWav
-
 import com.example.mobileappstrusted.audio.EditScriptUtils.extractEditHistoryFromWav
-import com.example.mobileappstrusted.audio.MetadataCollector.extractMetaDataFromWav
 import com.example.mobileappstrusted.audio.EditScriptUtils.getDeviceId
 import com.example.mobileappstrusted.audio.EditScriptUtils.getDeviceName
 import com.example.mobileappstrusted.audio.EditScriptUtils.reverseEdits
 import com.example.mobileappstrusted.audio.EditScriptUtils.undoLastEdit
+import com.example.mobileappstrusted.audio.InputStreamReader.splitWavIntoBlocks
+import com.example.mobileappstrusted.audio.MetadataCollector.extractMetaDataFromWav
+import com.example.mobileappstrusted.audio.WavCutter.markBlockDeleted
+import com.example.mobileappstrusted.audio.WavUtils.extractAmplitudesFromWav
 import com.example.mobileappstrusted.audio.WavUtils.writeBlocksToTempFile
 import com.example.mobileappstrusted.audio.WavUtils.writeWavFileToPersistentStorage
 import com.example.mobileappstrusted.components.NoPathGivenScreen
 import com.example.mobileappstrusted.components.WaveformView
+import com.example.mobileappstrusted.cryptography.DigitalSignatureUtils.verifyDigitalSignatureFromWav
 import com.example.mobileappstrusted.cryptography.MerkleHasher
 import com.example.mobileappstrusted.protobuf.EditHistoryProto
 import com.example.mobileappstrusted.protobuf.RecordingMetadataProto
@@ -57,6 +58,7 @@ import kotlin.math.min
 @Composable
 fun EditAudioScreen(filePath: String) {
     val context = LocalContext.current
+
     if (filePath.isBlank()) {
         NoPathGivenScreen()
         return
@@ -68,15 +70,13 @@ fun EditAudioScreen(filePath: String) {
         mutableStateOf(RecordingMetadataProto.RecordingMetadata.newBuilder().build())
     }
 
-
-
-
     val currentFilePath by remember { mutableStateOf(filePath) }
     var amplitudes by remember { mutableStateOf<List<Int>>(emptyList()) }
     val mediaPlayer = remember { MediaPlayer() }
     var isPlaying by remember { mutableStateOf(false) }
 
-    var isOriginal by remember { mutableStateOf<Boolean?>(null) }
+    var digitalSignatureMatches by remember { mutableStateOf<Boolean?>(null) }
+    var merkleRootMatches by remember { mutableStateOf<Boolean?>(null) }
     var verificationChecked by remember { mutableStateOf(false) }
 
     var reorderFromText by remember { mutableStateOf("") }
@@ -103,6 +103,51 @@ fun EditAudioScreen(filePath: String) {
             .sortedBy { it.currentIndex }
     }
 
+    var showPasswordDialog by remember { mutableStateOf(false) }
+    var passwordInput by remember { mutableStateOf("") }
+
+    var showDecryptDialog by remember { mutableStateOf(false) }
+    var decryptPasswordInput by remember { mutableStateOf("") }
+
+
+    fun exportWav(blocksToExport: List<WavBlockProtos.WavBlock>) {
+        val header = wavHeader ?: return
+        try {
+            val resolver = context.contentResolver
+            val fileName = "exported_audio_${System.currentTimeMillis()}.wav"
+
+            val contentValues = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                put(MediaStore.MediaColumns.MIME_TYPE, "audio/wav")
+                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_MUSIC)
+            }
+
+            val audioUri = resolver.insert(
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                contentValues
+            )
+
+            if (audioUri != null) {
+                resolver.openOutputStream(audioUri)?.use { outStream ->
+                    val merkleRoot = MerkleHasher.buildMerkleRoot(blocksToExport)
+                    val editHistory = EditHistoryProto.EditHistory.newBuilder()
+                        .addAllEntries(editHistoryEntries)
+                        .build()
+
+                    writeWavFileToPersistentStorage(context, outStream, blocksToExport, merkleRoot, editHistory, metaData)
+
+                    Toast.makeText(context, "Audio exported to Music/$fileName", Toast.LENGTH_LONG).show()
+                }
+            } else {
+                Toast.makeText(context, "Failed to create export file", Toast.LENGTH_SHORT).show()
+            }
+        } catch (e: Exception) {
+            Toast.makeText(context, "Export failed: ${e.message}", Toast.LENGTH_LONG).show()
+            e.printStackTrace()
+        }
+    }
+
+
     // 1) load amplitudes + initial mediaPlayer when path changes
     LaunchedEffect(currentFilePath) {
         val f = File(currentFilePath)
@@ -110,7 +155,7 @@ fun EditAudioScreen(filePath: String) {
             val (hdr, blks) = splitWavIntoBlocks(f)
             wavHeader = hdr
             blocks = blks
-            deletedBlockIndices = emptySet()
+            deletedBlockIndices = blks.filter { it.isDeleted }.map { it.originalIndex }.toSet()
             val visibleBlocks = blks.filterNot { deletedBlockIndices.contains(it.originalIndex) }
             playbackFile = writeBlocksToTempFile(context, hdr, visibleBlocks)
             amplitudes = extractAmplitudesFromWav(playbackFile!!)
@@ -133,8 +178,9 @@ fun EditAudioScreen(filePath: String) {
         }
 
         if (!verificationChecked && f.exists() && isWav) {
-            isOriginal = MerkleHasher.verifyWavMerkleRoot(f)
             verificationChecked = true
+            merkleRootMatches = MerkleHasher.verifyWavMerkleRoot(f)
+            digitalSignatureMatches = verifyDigitalSignatureFromWav(f)
         }
     }
 
@@ -160,9 +206,14 @@ fun EditAudioScreen(filePath: String) {
             .verticalScroll(rememberScrollState())
             .padding(16.dp)
     ) {
-        when (isOriginal) {
-            true -> Text("\u2714\uFE0F Verified", color = MaterialTheme.colorScheme.primary)
-            false -> Text("\u274C Not Verified", color = MaterialTheme.colorScheme.error)
+        when (digitalSignatureMatches) {
+            true -> Text("\u2714\uFE0F Digital Signature Matches", color = MaterialTheme.colorScheme.primary)
+            false -> Text("\u274C Not Verified by Digital Signature", color = MaterialTheme.colorScheme.error)
+            null -> {}
+        }
+        when (merkleRootMatches) {
+            true -> Text("\u2714\uFE0F Root hash matches", color = MaterialTheme.colorScheme.primary)
+            false -> Text("\u274C Root hash does not match", color = MaterialTheme.colorScheme.error)
             null -> {}
         }
 
@@ -258,7 +309,9 @@ fun EditAudioScreen(filePath: String) {
                         .putDetails("blockIndex", ""+indexToRemove)
                         .build()
                     editHistoryEntries.add(entry)
-
+                    blocks = blocks.map { blk ->
+                        if (blk.originalIndex == indexToRemove) markBlockDeleted(blk) else blk
+                    }
                 }
             }, modifier = Modifier.align(Alignment.End)) {
                 Text("Mark as Deleted")
@@ -367,48 +420,14 @@ fun EditAudioScreen(filePath: String) {
             reorderError?.let { Text(it, color=MaterialTheme.colorScheme.error) }
 
             Spacer(Modifier.height(16.dp))
-            Button(
-                onClick = {
-                    val header = wavHeader
-                    if (header != null) {
-                        try {
-                            val resolver = context.contentResolver
-                            val fileName = "exported_audio_${System.currentTimeMillis()}.wav"
-
-                            val contentValues = ContentValues().apply {
-                                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                                put(MediaStore.MediaColumns.MIME_TYPE, "audio/wav")
-                                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_MUSIC)
-                            }
-
-                            val audioUri = resolver.insert(
-                                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
-                                contentValues
-                            )
-
-                            if (audioUri != null) {
-                                resolver.openOutputStream(audioUri)?.use { outStream ->
-                                    val merkleRoot = MerkleHasher.buildMerkleRoot(blocks)
-                                    val editHistory = EditHistoryProto.EditHistory.newBuilder()
-                                        .addAllEntries(editHistoryEntries)
-                                        .build()
-
-
-                                    writeWavFileToPersistentStorage(outStream, blocks, merkleRoot, editHistory, metaData)
-
-
-                                    Toast.makeText(context, "Audio exported to Music/$fileName", Toast.LENGTH_LONG).show()
-                                }
-                            } else {
-                                Toast.makeText(context, "Failed to create export file", Toast.LENGTH_SHORT).show()
-                            }
-                        } catch (e: Exception) {
-                            Toast.makeText(context, "Export failed: ${e.message}", Toast.LENGTH_LONG).show()
-                            e.printStackTrace()
-                        }
-                    }
-                },
-                modifier = Modifier.align(Alignment.End)
+            Button(onClick = {
+                if (deletedBlockIndices.isNotEmpty()) {
+                    showPasswordDialog = true
+                } else {
+                    exportWav(blocks)
+                }
+            },
+                    modifier = Modifier.align(Alignment.End)
             ) {
                 Text("Export Audio")
             }
@@ -461,6 +480,18 @@ fun EditAudioScreen(filePath: String) {
                     )
                 }
             }
+            val containsEncryptedBlocks = blocks.any { it.isDeleted && it.isEncrypted }
+
+            if (containsEncryptedBlocks) {
+                Button(
+                    onClick = { showDecryptDialog = true },
+                    modifier = Modifier.align(Alignment.End)
+                ) {
+                    Text("Decrypt Deleted Blocks")
+                }
+            }
+
+
             if (metaData==null) {
                 Text("No metadata recorded.", style = MaterialTheme.typography.bodyMedium)
             } else {
@@ -472,5 +503,90 @@ fun EditAudioScreen(filePath: String) {
             }
 
         }
+
+        if (showPasswordDialog) {
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { showPasswordDialog = false },
+                title = { Text("Encrypt Deleted Blocks") },
+                text = {
+                    Column {
+                        Text("Enter a password to encrypt deleted blocks:")
+                        OutlinedTextField(
+                            value = passwordInput,
+                            onValueChange = { passwordInput = it },
+                            label = { Text("Password") }
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(onClick = {
+                        val encryptedBlocks = com.example.mobileappstrusted.cryptography.WavBlockEncryptor.encryptDeletedBlocksWithPassword(blocks, passwordInput)
+
+                        exportWav(encryptedBlocks)
+                        passwordInput = ""
+                        showPasswordDialog = false
+                    }) {
+                        Text("Confirm")
+                    }
+                },
+                dismissButton = {
+                    Button(onClick = {
+                        passwordInput = ""
+                        showPasswordDialog = false
+                    }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+
+        if (showDecryptDialog) {
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { showDecryptDialog = false },
+                title = { Text("Decrypt Deleted Blocks") },
+                text = {
+                    Column {
+                        Text("Enter the password to decrypt the deleted blocks:")
+                        OutlinedTextField(
+                            value = decryptPasswordInput,
+                            onValueChange = { decryptPasswordInput = it },
+                            label = { Text("Password") }
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(onClick = {
+                        val decrypted = com.example.mobileappstrusted.cryptography.WavBlockDecrypter
+                            .decryptDeletedBlocksWithPassword(blocks, decryptPasswordInput)
+
+                        if (decrypted != null) {
+                            blocks = decrypted
+                            Toast.makeText(context, "Decryption successful.", Toast.LENGTH_SHORT).show()
+                        } else {
+                            Toast.makeText(context, "Incorrect password or corrupted data.", Toast.LENGTH_SHORT).show()
+                        }
+
+                        showDecryptDialog = false
+                        decryptPasswordInput = ""
+                    }) {
+                        Text("Confirm")
+                    }
+                },
+
+                        dismissButton = {
+                    Button(onClick = {
+                        decryptPasswordInput = ""
+                        showDecryptDialog = false
+                    }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+
+
     }
 }
+
+
+
