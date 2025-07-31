@@ -20,7 +20,6 @@ import com.google.protobuf.CodedOutputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.OutputStream
-import kotlin.io.encoding.ExperimentalEncodingApi
 import kotlin.math.abs
 
 object WavUtils {
@@ -80,7 +79,7 @@ object WavUtils {
             writeWavHeaderToStream( pcmDataSize = dataBlocksSize,
                 merkleChunkSize = 35,
                 editHistorySize = 0,
-                metaDataSize= metadata.toByteArray().size,
+                metaDataSize= metadata.toByteArray().size, 0,
                 outputStream)
 
             writeWavBlocksToStream(outputStream, blocks)
@@ -108,7 +107,6 @@ object WavUtils {
         b[offset + 1] = ((value.toInt() shr 8) and 0xff).toByte()
     }
 
-    @OptIn(ExperimentalEncodingApi::class, ExperimentalStdlibApi::class)
     fun writeWavFileToPersistentStorage(
         context: Context,
         outputStream: OutputStream,
@@ -128,11 +126,18 @@ object WavUtils {
         val editHistorySize = editHistory.toByteArray().size
         val metaDataSize = metaData.toByteArray().size
 
+        var digitalSignatureBlockSize = 0
+        if (DigitalSignatureUtils.isPrivateKeyStored(context)){
+            val prefixSize = CodedOutputStream.computeUInt32SizeNoTag(833)
+            digitalSignatureBlockSize = 833 + prefixSize
+        }
+
         writeWavHeaderToStream(
             pcmDataSize = dataBlocksSize,
             merkleChunkSize = 35,
             editHistorySize = editHistorySize,
             metaDataSize = metaDataSize,
+            signatureSize = digitalSignatureBlockSize,
             outputStream = tempBuffer
         )
 
@@ -149,6 +154,8 @@ object WavUtils {
                 val publicKey = DigitalSignatureUtils.loadPublicKeyFromPrefs(context)!!
 
                 val signature = DigitalSignatureUtils.signData(wavBytes, context)
+
+                Log.i("AudioDebug", "Length of digital signature: " + signature.size)
 
                 SignatureBlockProto.SignatureBlock.newBuilder()
                     .setDigitalSignature(ByteString.copyFrom(signature))
@@ -185,6 +192,7 @@ object WavUtils {
                 merkleChunkSize = 35,
                 editHistorySize = 0,
                 metaDataSize = 0,
+                signatureSize = 0,
                 outputStream)
 
             writeWavBlocksToStream(outputStream, blocks)
