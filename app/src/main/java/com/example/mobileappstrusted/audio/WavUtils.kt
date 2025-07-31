@@ -1,7 +1,6 @@
 package com.example.mobileappstrusted.audio
 
 import android.content.Context
-import android.util.Log
 import com.example.mobileappstrusted.audio.InputStreamReader.chunkRawPcm
 import com.example.mobileappstrusted.audio.OutputStreamWriter.writeEditHistoryChunkToStream
 import com.example.mobileappstrusted.audio.OutputStreamWriter.writeMerkleRootChunkToStream

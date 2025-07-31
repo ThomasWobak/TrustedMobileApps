@@ -28,12 +28,10 @@ import com.example.mobileappstrusted.navigation.NavScreen
 fun HomeScreen(navController: NavHostController) {
     val context = LocalContext.current
 
-    // 🔐 Check if a private key is already stored
     val keyExists by remember {
         mutableStateOf(isPrivateKeyStored(context))
     }
 
-    // 📂 File picker launcher
     val keyFilePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
@@ -93,7 +91,6 @@ fun HomeScreen(navController: NavHostController) {
     }
 }
 
-// 📄 Get file name from URI
 fun getFileNameFromUri(context: android.content.Context, uri: Uri): String {
     val cursor = context.contentResolver.query(uri, null, null, null, null)
     val nameIndex = cursor?.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME) ?: -1

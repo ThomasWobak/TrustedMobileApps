@@ -69,7 +69,7 @@ object DigitalSignatureUtils {
             buffer.toByteArray()
         }
     }
-    @OptIn(ExperimentalStdlibApi::class)
+
     fun verifyDigitalSignatureFromWav(file: File): Boolean {
         val fullBytes = file.readBytes()
         val dsig = extractDigitalSignatureBlockFromWav(file) ?: return false
@@ -109,8 +109,6 @@ object DigitalSignatureUtils {
     private fun removeSignatureChunk(input: ByteArray): ByteArray {
         val output = ByteArrayOutputStream()
         val buffer = ByteBuffer.wrap(input).order(ByteOrder.LITTLE_ENDIAN)
-
-        // Copy RIFF header (first 12 bytes)
         output.write(input, 0, 12)
         buffer.position(12)
 
@@ -136,7 +134,6 @@ object DigitalSignatureUtils {
         return output.toByteArray()
     }
 
-    // 5️⃣ STORE PRIVATE & PUBLIC KEY
     fun storeKeyPair(context: Context, armoredSecretKey: String) {
         val secretKeyRing = PGPainless.readKeyRing().secretKeyRing(armoredSecretKey)
         val publicKeyRing = secretKeyRing?.let { PGPainless.extractCertificate(it) }
@@ -150,27 +147,22 @@ object DigitalSignatureUtils {
         }
     }
 
-    // 6️⃣ LOAD PRIVATE KEY
     fun loadPrivateKeyFromPrefs(context: Context): ByteArray? {
         return encryptedPrefs(context).getString("private_key", null)?.toByteArray(Charsets.US_ASCII)
     }
 
-    // 7️⃣ LOAD PUBLIC KEY
     fun loadPublicKeyFromPrefs(context: Context): ByteArray? {
         return encryptedPrefs(context).getString("public_key", null)?.toByteArray(Charsets.US_ASCII)
     }
 
-    // 8️⃣ LOAD PUBLIC KEY ID
     fun loadPublicKeyIdFromPrefs(context: Context): String? {
         return encryptedPrefs(context).getString("public_key_id", null)
     }
 
-    // 9️⃣ CHECK IF PRIVATE KEY IS STORED
     fun isPrivateKeyStored(context: Context): Boolean {
         return encryptedPrefs(context).contains("private_key")
     }
 
-    // 🔟 UTILITY: EXTRACT KEY ID FROM ARMORED SECRET KEY
     private fun extractKeyIdFromSecret(armoredSecretKey: String): String {
         val secretKeyRing = PGPainless.readKeyRing().secretKeyRing(armoredSecretKey)
         if (secretKeyRing != null) {
@@ -179,7 +171,6 @@ object DigitalSignatureUtils {
         return "unknown"
     }
 
-    // 🔐 ENCRYPTED PREFS HELPER
     private fun encryptedPrefs(context: Context) = EncryptedSharedPreferences.create(
         context, "secure_key_prefs",
         MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
