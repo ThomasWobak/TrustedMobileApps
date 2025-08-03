@@ -12,7 +12,7 @@
 // Lukas
 
 //TODO: Implement editing script with metadata and changes (user information) DONE
-//TODO: Implement general metadata on recording (user information)
+//TODO: Implement general metadata on recording (user information) DONE
 // Thomas
 
 //TODO usability
@@ -25,9 +25,9 @@
 //TODO: Improve Record Audio Screen (Showing audio being recorded, resuming recording,...) DONE
 //TODO: Implement reversing operation using temporary in memory editing script DONE
 
-//TODO: Improve cutting of audio (ease of use)
-//TODO: Improve removing of audio (granularity?, ease of use)
-//TODO: Implement menu in editing screen
+//TODO: Improve cutting of audio (ease of use) GOOD ENOUGH?
+//TODO: Improve removing of audio (granularity?, ease of use) GOOD ENOUGH?
+//TODO: Implement menu in editing screen NOT NEEDED?
 // Thomas
 
 
@@ -55,6 +55,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.mobileappstrusted.components.BottomBar
 import com.example.mobileappstrusted.navigation.NavScreen
+import com.example.mobileappstrusted.screens.DebugAudioScreen
 import com.example.mobileappstrusted.screens.EditAudioScreen
 import com.example.mobileappstrusted.screens.HomeScreen
 import com.example.mobileappstrusted.screens.RecordAudioScreen
@@ -83,14 +84,28 @@ class MainActivity : ComponentActivity() {
 
                         //Record
                         composable(NavScreen.Record.route) {
-                            RecordAudioScreen { recordedFilePath ->
+                            RecordAudioScreen { targetPath ->
                                 Handler(Looper.getMainLooper()).post {
-                                    navController.navigate(NavScreen.Edit.createRoute(recordedFilePath)) {
-                                        popUpTo(navController.graph.findStartDestination().id) {
-                                            inclusive = false
+                                    when {
+                                        targetPath.startsWith("debug:") -> {
+                                            val actualPath = targetPath.removePrefix("debug:")
+                                            navController.navigate(NavScreen.Debug.createRoute(actualPath)) {
+                                                popUpTo(navController.graph.findStartDestination().id) {
+                                                    inclusive = false
+                                                }
+                                                launchSingleTop = true
+                                                restoreState = false
+                                            }
                                         }
-                                        launchSingleTop = true
-                                        restoreState = false
+                                        else -> {
+                                            navController.navigate(NavScreen.Edit.createRoute(targetPath)) {
+                                                popUpTo(navController.graph.findStartDestination().id) {
+                                                    inclusive = false
+                                                }
+                                                launchSingleTop = true
+                                                restoreState = false
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -114,6 +129,23 @@ class MainActivity : ComponentActivity() {
                             val encoded = backStackEntry.arguments?.getString("filePath") ?: ""
                             val filePath = URLDecoder.decode(encoded, "UTF-8")
                             EditAudioScreen(filePath = filePath)
+                        }
+
+                        // Debug with no args → placeholder
+                        composable(NavScreen.Debug.route) {
+                            DebugAudioScreen(filePath = "")
+                        }
+
+                        // Debug with a real path: "debug/{filePath}"
+                        composable(
+                            route = NavScreen.Debug.routeWithArgs,
+                            arguments = listOf(navArgument("filePath") {
+                                type = NavType.StringType
+                            })
+                        ) { backStackEntry ->
+                            val encoded = backStackEntry.arguments?.getString("filePath") ?: ""
+                            val filePath = URLDecoder.decode(encoded, "UTF-8")
+                            DebugAudioScreen(filePath = filePath)
                         }
                     }
                 }

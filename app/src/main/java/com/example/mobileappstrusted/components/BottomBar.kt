@@ -16,7 +16,8 @@ fun BottomBar(navController: NavHostController) {
     val items = listOf(
         NavScreen.Home,
         NavScreen.Record,
-        NavScreen.Edit
+        NavScreen.Edit,
+        NavScreen.Debug
     )
 
     val navBackStackEntry by navController.currentBackStackEntryAsState()
@@ -26,6 +27,7 @@ fun BottomBar(navController: NavHostController) {
         items.forEach { screen ->
             val selected = when (screen) {
                 is NavScreen.Edit -> navBackStackEntry?.destination?.route?.startsWith("edit/") == true
+                is NavScreen.Debug -> navBackStackEntry?.destination?.route?.startsWith("debug/") == true
                 else -> currentRoute == screen.route
             }
 
@@ -36,7 +38,7 @@ fun BottomBar(navController: NavHostController) {
                 onClick = {
                     if (!selected) {
                         //Edit needs dynamic args (filepath), but others don't. So the back stack if cleared first for those
-                        if (screen != NavScreen.Edit) {
+                        if (screen != NavScreen.Edit && screen != NavScreen.Debug) {
                             navController.navigate(screen.route) {
                                 popUpTo(navController.graph.findStartDestination().id) {
                                     inclusive = true

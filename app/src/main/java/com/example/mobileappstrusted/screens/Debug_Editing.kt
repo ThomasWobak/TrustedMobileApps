@@ -56,7 +56,7 @@ import java.io.File
 import kotlin.math.min
 
 @Composable
-fun EditAudioScreen(filePath: String) {
+fun DebugAudioScreen(filePath: String) {
     val context = LocalContext.current
 
     if (filePath.isBlank()) {

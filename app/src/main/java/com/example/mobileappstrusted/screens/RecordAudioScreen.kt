@@ -271,6 +271,20 @@ fun RecordAudioScreen(onRecordingComplete: (String) -> Unit) {
                 ) {
                     Text("Go to Edit")
                 }
+                Button(
+                    onClick = {
+                        lastTempFile?.let { file ->
+                            // Navigate to Debug screen using file path
+                            onRecordingComplete("debug:${file.absolutePath}")
+                        }
+                        shouldClearState = true
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp)
+                ) {
+                    Text("Go to Debug")
+                }
             }
         }
     }
