@@ -78,7 +78,7 @@ object OutputStreamWriter {
         outputStream.write(metadataBytes)
     }
 
-    fun writeWavHeaderToStream(pcmDataSize: Int, merkleChunkSize: Int, editHistorySize: Int, metaDataSize: Int, outputStream: OutputStream) {
+    fun writeWavHeaderToStream(pcmDataSize: Int, merkleChunkSize: Int, editHistorySize: Int, metaDataSize: Int, signatureSize: Int, outputStream: OutputStream) {
         val sampleRate = 44100
         val channels = 1
         val bitDepth = 16
@@ -91,7 +91,7 @@ object OutputStreamWriter {
         val chunkEdhiHeader = 8
         val chunkMetaHeader = 8
         val riffHeader = 4
-
+        val signatureBlockSize = if (signatureSize != 0) signatureSize + 8 else 0
 
 
         val riffSize = riffHeader +
@@ -99,7 +99,8 @@ object OutputStreamWriter {
                 chunkDataHeader + pcmDataSize +
                 chunkOmrhHeader + merkleChunkSize +
                 chunkEdhiHeader + editHistorySize +
-                chunkMetaHeader + metaDataSize
+                chunkMetaHeader + metaDataSize +
+                signatureBlockSize
 
 
         val header = ByteArray(44)

@@ -32,7 +32,7 @@ object WavBlockDecrypter {
             blocks.map { block ->
                 if (block.isEncrypted) {
                     if (block.undeletedHash == null || block.undeletedHash.isEmpty) {
-                        return null
+                        block
                     }
 
                     val decryptedChained = decrypt(block.pcmData.toByteArray(), password)
