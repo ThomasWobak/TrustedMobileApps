@@ -96,7 +96,7 @@ fun EditAudioScreen(filePath: String) {
             val (hdr, blks) = splitWavIntoBlocks(f)
             wavHeader = hdr
             blocks = blks
-            deletedBlockIndices = emptySet()
+            deletedBlockIndices = blks.filter { it.isDeleted }.map { it.originalIndex }.toSet()
             val visibleBlocks = blks.filterNot { deletedBlockIndices.contains(it.originalIndex) }
             playbackFile = writeBlocksToTempFile(context, hdr, visibleBlocks)
             amplitudes = extractAmplitudesFromWav(playbackFile!!)
