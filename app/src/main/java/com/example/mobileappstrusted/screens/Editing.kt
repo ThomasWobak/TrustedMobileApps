@@ -205,7 +205,6 @@ fun EditAudioScreen(filePath: String) {
         mediaPlayer.prepare()
     }
 
-
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)
     ) {
@@ -308,14 +307,17 @@ fun EditAudioScreen(filePath: String) {
                             .setChangeType(EditHistoryProto.ChangeType.DELETE_BLOCK)
                             .putDetails("blockCurrentIndex", t.currentIndex.toString())
                             .putDetails("blockOriginalIndex", t.originalIndex.toString())
+                            .putDetails("blockIndex", t.originalIndex.toString())
                             .build()
                         editHistoryEntries.add(entry)
 
+                        // Mark the block deleted in the list
                         blocks = blocks.map { blk ->
                             if (blk.originalIndex == t.originalIndex) markBlockDeleted(blk) else blk
                         }
                     }
                     deletedBlockIndices = deletedBlockIndices + targets.map { it.originalIndex }
+
                     reorderText = ""
                     selectedBlockIndices = emptySet()
                     editError = null
@@ -334,6 +336,7 @@ fun EditAudioScreen(filePath: String) {
                         .filterNot { deletedBlockIndices.contains(it.originalIndex) || it.isDeleted || it.isEncrypted }
                         .sortedBy { it.currentIndex }
                         .toMutableList()
+                    val prevOrder = sorted.map { it.originalIndex }.joinToString(",")
 
                     // Validate currentIndex presence
                     val missing = fromIndices.filter { idx -> sorted.none { it.currentIndex == idx } }
@@ -366,10 +369,12 @@ fun EditAudioScreen(filePath: String) {
                             .setDeviceId(getDeviceId(context))
                             .setTimestamp(System.currentTimeMillis())
                             .setChangeType(EditHistoryProto.ChangeType.REORDER_BLOCK)
-                            .putDetails("movedCurrentIndex", blk.currentIndex.toString())
+                            .putDetails("prevOrderOriginal", prevOrder)
                             .putDetails("insertAt", insertAt.toString())
+                            .putDetails("movedCurrentIndex", fromIndices.joinToString(","))
                             .build()
                         editHistoryEntries.add(entry)
+
                     }
 
                     regenerateWaveformFromVisibleBlocks()
