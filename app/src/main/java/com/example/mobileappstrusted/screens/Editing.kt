@@ -84,7 +84,7 @@ fun EditAudioScreen(filePath: String) {
     var selectedBlockIndices by remember { mutableStateOf<Set<Int>>(emptySet()) }
 
     val visibleBlocks = remember(blocks, deletedBlockIndices) {
-        blocks.filterNot { deletedBlockIndices.contains(it.originalIndex) }.sortedBy { it.currentIndex }
+        blocks.filterNot { (deletedBlockIndices.contains(it.originalIndex))||(it.isDeleted)||(it.isEncrypted) }.sortedBy { it.currentIndex }
     }
 
     var maxAmplitude by remember { mutableStateOf(1) }
@@ -97,7 +97,7 @@ fun EditAudioScreen(filePath: String) {
             wavHeader = hdr
             blocks = blks
             deletedBlockIndices = blks.filter { it.isDeleted }.map { it.originalIndex }.toSet()
-            val visibleBlocks = blks.filterNot { deletedBlockIndices.contains(it.originalIndex) }
+            val visibleBlocks = blks.filterNot { (deletedBlockIndices.contains(it.originalIndex))||(it.isDeleted)||(it.isEncrypted) }
             playbackFile = writeBlocksToTempFile(context, hdr, visibleBlocks)
             amplitudes = extractAmplitudesFromWav(playbackFile!!)
             maxAmplitude = amplitudes.maxOrNull()?.coerceAtLeast(1) ?: 1
@@ -196,7 +196,7 @@ fun EditAudioScreen(filePath: String) {
     //should probably be exported to WavUtils but this is easier for now.
     fun regenerateWaveformFromVisibleBlocks() {
         val hdr = wavHeader ?: return
-        val visible = blocks.filterNot { deletedBlockIndices.contains(it.originalIndex) }
+        val visible = blocks.filterNot { (deletedBlockIndices.contains(it.originalIndex))||(it.isDeleted)||(it.isEncrypted) }
         playbackFile = writeBlocksToTempFile(context, hdr, visible)
         amplitudes = extractAmplitudesFromWav(playbackFile!!)
         maxAmplitude = amplitudes.maxOrNull()?.coerceAtLeast(1) ?: 1
@@ -483,12 +483,17 @@ fun EditAudioScreen(filePath: String) {
 
                         if (decrypted != null) {
                             blocks = decrypted
+                            deletedBlockIndices = decrypted.filter { it.isDeleted }.map { it.originalIndex }.toSet()
+
                             Toast.makeText(context, "Decryption successful.", Toast.LENGTH_SHORT).show()
+                            regenerateWaveformFromVisibleBlocks()
+
                         } else {
                             Toast.makeText(context, "Incorrect password or corrupted data.", Toast.LENGTH_SHORT).show()
                         }
 
                         showDecryptDialog = false
+                        regenerateWaveformFromVisibleBlocks()
                         decryptPasswordInput = ""
                     }) {
                         Text("Confirm")
@@ -499,6 +504,7 @@ fun EditAudioScreen(filePath: String) {
                     Button(onClick = {
                         decryptPasswordInput = ""
                         showDecryptDialog = false
+                        regenerateWaveformFromVisibleBlocks()
                     }) {
                         Text("Cancel")
                     }
