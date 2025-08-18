@@ -279,70 +279,102 @@ fun EditAudioScreen(filePath: String) {
             Spacer(Modifier.height(8.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Button(onClick = {
-                    val indices = reorderText.split(",").mapNotNull { it.trim().toIntOrNull() }
-                    val invalid = indices.filter { idx ->
-                        !blocks.any { it.originalIndex == idx } || deletedBlockIndices.contains(idx)
-                    }
+                    val indices = reorderText.split(",").mapNotNull { it.trim().toIntOrNull() }.distinct()
                     if (indices.isEmpty()) {
                         editError = "Invalid input"
-                    } else if (invalid.isNotEmpty()) {
-                        editError = "Invalid or already deleted: ${invalid.joinToString(",")}"
-                    } else {
-                        deletedBlockIndices = deletedBlockIndices + indices
-                        reorderText = ""
-                        indices.forEach { idx ->
-                            val entry = EditHistoryProto.EditHistoryEntry.newBuilder()
-                                .setUserId(getDeviceName())
-                                .setDeviceId(getDeviceId(context))
-                                .setTimestamp(System.currentTimeMillis())
-                                .setChangeType(EditHistoryProto.ChangeType.DELETE_BLOCK)
-                                .putDetails("blockIndex", idx.toString())
-                                .build()
-                            editHistoryEntries.add(entry)
-                            blocks = blocks.map { blk ->
-                                if (blk.originalIndex == idx) markBlockDeleted(blk) else blk
-                            }
-                        }
-                        regenerateWaveformFromVisibleBlocks()
+                        return@Button
                     }
+
+                    // Find target blocks by currentIndex among visible (non-deleted, non-encrypted)
+                    val targets = blocks.filter { blk ->
+                        blk.currentIndex in indices && !blk.isDeleted && !blk.isEncrypted &&
+                                !deletedBlockIndices.contains(blk.originalIndex)
+                    }
+
+                    val missing = indices.filter { idx ->
+                        targets.none { it.currentIndex == idx }
+                    }
+                    if (missing.isNotEmpty()) {
+                        editError = "Invalid or already deleted: ${missing.joinToString(",")}"
+                        return@Button
+                    }
+
+                    // Mark deleted, update deletedBlockIndices using ORIGINAL indices
+                    targets.forEach { t ->
+                        val entry = EditHistoryProto.EditHistoryEntry.newBuilder()
+                            .setUserId(getDeviceName())
+                            .setDeviceId(getDeviceId(context))
+                            .setTimestamp(System.currentTimeMillis())
+                            .setChangeType(EditHistoryProto.ChangeType.DELETE_BLOCK)
+                            .putDetails("blockCurrentIndex", t.currentIndex.toString())
+                            .putDetails("blockOriginalIndex", t.originalIndex.toString())
+                            .build()
+                        editHistoryEntries.add(entry)
+
+                        blocks = blocks.map { blk ->
+                            if (blk.originalIndex == t.originalIndex) markBlockDeleted(blk) else blk
+                        }
+                    }
+                    deletedBlockIndices = deletedBlockIndices + targets.map { it.originalIndex }
+                    reorderText = ""
+                    selectedBlockIndices = emptySet()
+                    editError = null
+                    regenerateWaveformFromVisibleBlocks()
                 }) { Text("Mark as Deleted") }
 
                 Button(onClick = {
-                    val fromIndices = reorderText.split(",").mapNotNull { it.trim().toIntOrNull() }.distinct().sorted()
+                    val fromIndices = reorderText.split(",").mapNotNull { it.trim().toIntOrNull() }.distinct()
                     val toPos = insertAtText.toIntOrNull()
                     if (fromIndices.isEmpty() || toPos == null) {
                         editError = "Invalid"
-                    } else {
-                        var sorted = blocks.filterNot { deletedBlockIndices.contains(it.originalIndex) }
-                            .sortedBy { it.currentIndex }.toMutableList()
-                        if (fromIndices.any { it !in sorted.indices } || toPos !in 0..sorted.size) {
-                            editError = "Out of range"
-                        } else {
-                            val blocksToMove = fromIndices.map { sorted[it] }
-                            fromIndices.sortedDescending().forEach { sorted.removeAt(it) }
-                            sorted.addAll(toPos.coerceAtMost(sorted.size), blocksToMove)
-                            sorted = sorted.mapIndexed { i, blk ->
-                                blk.toBuilder().setCurrentIndex(i).build()
-                            }.toMutableList()
-                            blocks = sorted
-
-                            reorderText = ""
-                            insertAtText = ""
-                            blocksToMove.forEach { blk ->
-                                val entry = EditHistoryProto.EditHistoryEntry.newBuilder()
-                                    .setUserId(getDeviceName())
-                                    .setDeviceId(getDeviceId(context))
-                                    .setTimestamp(System.currentTimeMillis())
-                                    .setChangeType(EditHistoryProto.ChangeType.REORDER_BLOCK)
-                                    .putDetails("Moved Block", "to $toPos")
-                                    .putDetails("Original Index", blk.currentIndex.toString())
-                                    .build()
-                                editHistoryEntries.add(entry)
-                            }
-                            regenerateWaveformFromVisibleBlocks()
-                        }
+                        return@Button
                     }
+
+                    var sorted = blocks
+                        .filterNot { deletedBlockIndices.contains(it.originalIndex) || it.isDeleted || it.isEncrypted }
+                        .sortedBy { it.currentIndex }
+                        .toMutableList()
+
+                    // Validate currentIndex presence
+                    val missing = fromIndices.filter { idx -> sorted.none { it.currentIndex == idx } }
+                    if (missing.isNotEmpty() || toPos !in 0..sorted.size) {
+                        editError = "Out of range"
+                        return@Button
+                    }
+
+                    // Select by currentIndex, then remove by identity (not by position!)
+                    val blocksToMove = sorted.filter { it.currentIndex in fromIndices }
+                    sorted.removeAll(blocksToMove)
+
+                    val insertAt = toPos.coerceIn(0, sorted.size)
+                    sorted.addAll(insertAt, blocksToMove)
+
+                    // Renumber currentIndex after reorder
+                    sorted = sorted.mapIndexed { i, blk ->
+                        blk.toBuilder().setCurrentIndex(i).build()
+                    }.toMutableList()
+
+                    blocks = sorted
+                    reorderText = ""
+                    insertAtText = ""
+                    selectedBlockIndices = emptySet()
+                    editError = null
+
+                    blocksToMove.forEach { blk ->
+                        val entry = EditHistoryProto.EditHistoryEntry.newBuilder()
+                            .setUserId(getDeviceName())
+                            .setDeviceId(getDeviceId(context))
+                            .setTimestamp(System.currentTimeMillis())
+                            .setChangeType(EditHistoryProto.ChangeType.REORDER_BLOCK)
+                            .putDetails("movedCurrentIndex", blk.currentIndex.toString())
+                            .putDetails("insertAt", insertAt.toString())
+                            .build()
+                        editHistoryEntries.add(entry)
+                    }
+
+                    regenerateWaveformFromVisibleBlocks()
                 }) { Text("Apply Reorder") }
+
             }
             Spacer(Modifier.height(8.dp))
             editError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
@@ -378,7 +410,7 @@ fun EditAudioScreen(filePath: String) {
                 ) {
                     Text("Export Audio")
                 }
-                val containsEncryptedBlocks = blocks.any { it.isDeleted && it.isEncrypted }
+                val containsEncryptedBlocks = blocks.any {it.isEncrypted }
 
                 if (containsEncryptedBlocks) {
                     Button(
