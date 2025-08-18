@@ -5,17 +5,30 @@ import android.media.MediaPlayer
 import android.os.Environment
 import android.provider.MediaStore
 import android.widget.Toast
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Button
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import com.example.mobileappstrusted.audio.InputStreamReader.splitWavIntoBlocks
-import com.example.mobileappstrusted.audio.MetadataCollector.extractMetaDataFromWav
-import com.example.mobileappstrusted.audio.WavCutter.markBlockDeleted
-import com.example.mobileappstrusted.audio.WavUtils.extractAmplitudesFromWav
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -26,16 +39,20 @@ import com.example.mobileappstrusted.audio.EditScriptUtils.getDeviceId
 import com.example.mobileappstrusted.audio.EditScriptUtils.getDeviceName
 import com.example.mobileappstrusted.audio.EditScriptUtils.undoLastEdit
 import com.example.mobileappstrusted.audio.InputStreamReader
+import com.example.mobileappstrusted.audio.InputStreamReader.splitWavIntoBlocks
+import com.example.mobileappstrusted.audio.MetadataCollector.extractMetaDataFromWav
+import com.example.mobileappstrusted.audio.WavCutter.markBlockDeleted
+import com.example.mobileappstrusted.audio.WavUtils.extractAmplitudesFromWav
 import com.example.mobileappstrusted.audio.WavUtils.writeBlocksToTempFile
 import com.example.mobileappstrusted.audio.WavUtils.writeWavFileToPersistentStorage
 import com.example.mobileappstrusted.components.NoPathGivenScreen
 import com.example.mobileappstrusted.components.WaveformViewEditing
+import com.example.mobileappstrusted.cryptography.DigitalSignatureUtils.verifyDigitalSignatureFromWav
 import com.example.mobileappstrusted.cryptography.MerkleHasher
 import com.example.mobileappstrusted.protobuf.EditHistoryProto
 import com.example.mobileappstrusted.protobuf.RecordingMetadataProto
 import com.example.mobileappstrusted.protobuf.WavBlockProtos
 import java.io.File
-import com.example.mobileappstrusted.cryptography.DigitalSignatureUtils.verifyDigitalSignatureFromWav
 
 @Composable
 fun EditAudioScreen(filePath: String) {
@@ -51,7 +68,8 @@ fun EditAudioScreen(filePath: String) {
     var amplitudes by remember { mutableStateOf<List<Int>>(emptyList()) }
     val mediaPlayer = remember { MediaPlayer() }
     var isPlaying by remember { mutableStateOf(false) }
-    var isOriginal by remember { mutableStateOf<Boolean?>(null) }
+    var digitalSignatureMatches by remember { mutableStateOf<Boolean?>(null) }
+    var merkleRootMatches by remember { mutableStateOf<Boolean?>(null) }
     var verificationChecked by remember { mutableStateOf(false) }
 
     var reorderText by remember { mutableStateOf("") }
@@ -78,7 +96,7 @@ fun EditAudioScreen(filePath: String) {
             val (hdr, blks) = splitWavIntoBlocks(f)
             wavHeader = hdr
             blocks = blks
-            deletedBlockIndices = emptySet()
+            deletedBlockIndices = blks.filter { it.isDeleted }.map { it.originalIndex }.toSet()
             val visibleBlocks = blks.filterNot { deletedBlockIndices.contains(it.originalIndex) }
             playbackFile = writeBlocksToTempFile(context, hdr, visibleBlocks)
             amplitudes = extractAmplitudesFromWav(playbackFile!!)
@@ -100,9 +118,8 @@ fun EditAudioScreen(filePath: String) {
             mediaPlayer.prepare()
         }
         if (!verificationChecked && f.exists() && isWav) {
-            val merkleRootMatches = MerkleHasher.verifyWavMerkleRoot(f)
-            val digitalSignatureMatches = verifyDigitalSignatureFromWav(f)
-            isOriginal = merkleRootMatches && digitalSignatureMatches
+            merkleRootMatches = MerkleHasher.verifyWavMerkleRoot(f)
+            digitalSignatureMatches = verifyDigitalSignatureFromWav(f)
             verificationChecked = true
         }
     }
@@ -192,9 +209,14 @@ fun EditAudioScreen(filePath: String) {
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)
     ) {
-        when (isOriginal) {
-            true -> Text("\u2714\uFE0F Verified", color = MaterialTheme.colorScheme.primary)
-            false -> Text("\u274C Not Verified", color = MaterialTheme.colorScheme.error)
+        when (digitalSignatureMatches) {
+            true -> Text("\u2714\uFE0F Digital Signature Matches", color = MaterialTheme.colorScheme.primary)
+            false -> Text("\u274C Not Verified by Digital Signature", color = MaterialTheme.colorScheme.error)
+            null -> {}
+        }
+        when (merkleRootMatches) {
+            true -> Text("\u2714\uFE0F Root hash matches", color = MaterialTheme.colorScheme.primary)
+            false -> Text("\u274C Root hash does not match", color = MaterialTheme.colorScheme.error)
             null -> {}
         }
 
