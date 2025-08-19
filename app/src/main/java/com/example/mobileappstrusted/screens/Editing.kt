@@ -82,6 +82,7 @@ fun EditAudioScreen(filePath: String) {
     var blocks by remember { mutableStateOf<List<WavBlockProtos.WavBlock>>(emptyList()) }
     var playbackFile by remember { mutableStateOf<File?>(null) }
     var selectedBlockIndices by remember { mutableStateOf<Set<Int>>(emptySet()) }
+    var containsEncryptedBlocksFromBefore by remember { mutableStateOf(false) }
 
     val visibleBlocks = remember(blocks, deletedBlockIndices) {
         blocks.filterNot { (deletedBlockIndices.contains(it.originalIndex))||(it.isDeleted)||(it.isEncrypted) }.sortedBy { it.currentIndex }
@@ -98,6 +99,7 @@ fun EditAudioScreen(filePath: String) {
             blocks = blks
             deletedBlockIndices = blks.filter { it.isDeleted }.map { it.originalIndex }.toSet()
             val visibleBlocks = blks.filterNot { (deletedBlockIndices.contains(it.originalIndex))||(it.isDeleted)||(it.isEncrypted) }
+            containsEncryptedBlocksFromBefore = blks.any { it.isEncrypted }
             playbackFile = writeBlocksToTempFile(context, hdr, visibleBlocks)
             amplitudes = extractAmplitudesFromWav(playbackFile!!)
             maxAmplitude = amplitudes.maxOrNull()?.coerceAtLeast(1) ?: 1
@@ -277,7 +279,9 @@ fun EditAudioScreen(filePath: String) {
             )
             Spacer(Modifier.height(8.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Button(onClick = {
+                Button(
+                    enabled = !containsEncryptedBlocksFromBefore,
+                    onClick = {
                     val indices = reorderText.split(",").mapNotNull { it.trim().toIntOrNull() }.distinct()
                     if (indices.isEmpty()) {
                         editError = "Invalid input"
@@ -523,6 +527,7 @@ fun EditAudioScreen(filePath: String) {
                             deletedBlockIndices = decrypted.filter { it.isDeleted }.map { it.originalIndex }.toSet()
 
                             Toast.makeText(context, "Decryption successful.", Toast.LENGTH_SHORT).show()
+                            containsEncryptedBlocksFromBefore = false
                             regenerateWaveformFromVisibleBlocks()
 
                         } else {
