@@ -405,7 +405,7 @@ fun EditAudioScreen(filePath: String) {
                 Spacer(Modifier.height(16.dp))
                 Button(
                     onClick = {
-                        if (deletedBlockIndices.isNotEmpty()) {
+                        if (deletedBlockIndices.isNotEmpty() && !blocks.any { it.isEncrypted }) {
                             showPasswordDialog = true
                         } else {
                             exportWav(blocks)
