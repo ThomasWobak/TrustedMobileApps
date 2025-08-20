@@ -12,6 +12,7 @@ import java.nio.ByteOrder
 
 object InputStreamReader {
     private const val BLOCK_SIZE = 100 * 1024  // 100 KB per block, roughly 1.16 seconds
+    const val BLOCK_TIME=1.16f  //Seconds value for other classes to take
 
     fun splitWavIntoBlocks(file: File): Pair<ByteArray, List<WavBlockProtos.WavBlock>> {
         return splitWavIntoBlocks(file.readBytes())

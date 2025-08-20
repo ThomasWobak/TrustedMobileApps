@@ -11,10 +11,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.input.pointer.*
 import androidx.compose.foundation.gestures.detectTapGestures
 
-
-
-
-
 @Composable
 fun WaveformView(
     amplitudes: List<Int>,

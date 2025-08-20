@@ -108,6 +108,26 @@ object EditScriptUtils {
         return currentBlocks to currentDeleted
     }
 
+    private fun reindexCurrentIndices(
+        blocks: List<WavBlockProtos.WavBlock>,
+        deletedOriginalIndices: Set<Int>
+    ): List<WavBlockProtos.WavBlock> {
+        val visible = blocks
+            .filter { blk ->
+                !deletedOriginalIndices.contains(blk.originalIndex) &&
+                        !blk.isDeleted && !blk.isEncrypted
+            }
+            .sortedBy { it.currentIndex }
+
+        val newIdxByOriginal = visible
+            .mapIndexed { i, blk -> blk.originalIndex to i }
+            .toMap()
+
+        return blocks.map { blk ->
+            val newIdx = newIdxByOriginal[blk.originalIndex]
+            if (newIdx != null) blk.toBuilder().setCurrentIndex(newIdx).build() else blk
+        }
+    }
 
     fun undoLastEdit(
         blocks: List<WavBlockProtos.WavBlock>,
@@ -118,59 +138,101 @@ object EditScriptUtils {
         if (editHistory.entriesList.isEmpty()) return Triple(blocks, deletedBlockIndices, editHistory)
 
         val last = editHistory.entriesList.last()
-        val newHistory = EditHistoryProto.EditHistory.newBuilder()
-            .addAllEntries(editHistory.entriesList.dropLast(1)) // remove last
-            .build()
-
         var currentBlocks = blocks.toMutableList()
         var currentDeleted = deletedBlockIndices.toMutableSet()
 
         when (last.changeType) {
             EditHistoryProto.ChangeType.DELETE_BLOCK -> {
-                val idx = last.detailsMap["blockIndex"]?.toIntOrNull()
-                if (idx != null) currentDeleted.remove(idx)
-            }
 
-            EditHistoryProto.ChangeType.RESTORE_BLOCK -> {
-                // Cannot undo “restore all” without more data
-                // Could reapply deletions if you tracked previous deletions
+                val origIdxStr = last.detailsMap["blockOriginalIndex"]
+                    ?: last.detailsMap["blockIndex"]
+                    ?: last.detailsMap["blockCurrentIndex"]
+                val originalIndex: Int? = when {
+                    origIdxStr != null -> origIdxStr.toIntOrNull()
+                    else -> null
+                }
+
+                if (originalIndex != null) {
+                    // Flip flags back on the block
+                    currentBlocks = currentBlocks.map { blk ->
+                        if (blk.originalIndex == originalIndex) {
+                            blk.toBuilder()
+                                .setIsDeleted(false)
+                                .clearUndeletedHash()
+                                .build()
+                        } else blk
+                    }.toMutableList()
+
+                    currentDeleted.remove(originalIndex)
+
+                    // Reindex visible blocks
+                    currentBlocks = reindexCurrentIndices(currentBlocks, currentDeleted).toMutableList()
+                }
             }
 
             EditHistoryProto.ChangeType.REORDER_BLOCK -> {
-                val moved = last.detailsMap["Moved Block"] ?: return Triple(blocks, deletedBlockIndices, editHistory)
-                val match = Regex("""from (\d+) to (\d+)""").find(moved)
-                val fromIndex = match?.groupValues?.getOrNull(1)?.toIntOrNull() ?: return Triple(blocks, deletedBlockIndices, editHistory)
-                val toIndex = match.groupValues.getOrNull(2)?.toIntOrNull() ?: return Triple(blocks, deletedBlockIndices, editHistory)
 
-                val sorted = currentBlocks.filterNot { currentDeleted.contains(it.originalIndex) }
-                    .sortedBy { it.currentIndex }
-                    .toMutableList()
+                val prevOrderCsv = last.detailsMap["prevOrderOriginal"]
+                if (!prevOrderCsv.isNullOrBlank()) {
+                    val order = prevOrderCsv.split(",").mapNotNull { it.trim().toIntOrNull() }
 
-                if (toIndex >= sorted.size || fromIndex > sorted.size) return Triple(blocks, deletedBlockIndices, editHistory)
+                    val visible = currentBlocks
+                        .filter { blk -> !currentDeleted.contains(blk.originalIndex) && !blk.isDeleted && !blk.isEncrypted }
+                        .associateBy { it.originalIndex }
+                        .toMutableMap()
 
-                // Remove the block at position `toIndex` (where it was moved to)
-                val movedBlock = sorted.removeAt(toIndex)
+                    val reorderedVisible = order.mapNotNull { oi -> visible[oi] }
 
-                // Insert it back at position `fromIndex` (where it came from)
-                sorted.add(fromIndex, movedBlock)
+                    val reindexed = currentBlocks.map { blk ->
+                        val newPos = reorderedVisible.indexOfFirst { it.originalIndex == blk.originalIndex }
+                        if (newPos >= 0) blk.toBuilder().setCurrentIndex(newPos).build() else blk
+                    }
 
-                // Reassign currentIndex values to reflect new order
-                currentBlocks = sorted.mapIndexed { i, b ->
-                    b.toBuilder().setCurrentIndex(i).build()
-                }.toMutableList()
+                    currentBlocks = reindexed.toMutableList()
+                } else {
+
+                    val moved = last.detailsMap["Moved Block"]
+                    val match = moved?.let { Regex("""from (\d+) to (\d+)""").find(it) }
+                    val fromIndex = match?.groupValues?.getOrNull(1)?.toIntOrNull()
+                    val toIndex = match?.groupValues?.getOrNull(2)?.toIntOrNull()
+
+                    if (fromIndex != null && toIndex != null) {
+                        var sorted = currentBlocks
+                            .filterNot { currentDeleted.contains(it.originalIndex) || it.isDeleted || it.isEncrypted }
+                            .sortedBy { it.currentIndex }
+                            .toMutableList()
+
+                        if (toIndex in sorted.indices && fromIndex in 0..sorted.size) {
+                            val movedBlock = sorted.removeAt(toIndex)
+                            sorted.add(fromIndex, movedBlock)
+                            sorted = sorted.mapIndexed { i, b -> b.toBuilder().setCurrentIndex(i).build() }.toMutableList()
+
+
+                            val byOriginal = sorted.associateBy { it.originalIndex }
+                            currentBlocks = currentBlocks.map { b ->
+                                byOriginal[b.originalIndex] ?: b
+                            }.toMutableList()
+                        }
+                    }
+                }
             }
+
 
             EditHistoryProto.ChangeType.RESTORE_ORDER -> {
-                currentBlocks = currentBlocks
-                    .map { it.toBuilder().setCurrentIndex(it.originalIndex).build() }
-                    .sortedBy { it.currentIndex }
-                    .toMutableList()
+                // Reset visible blocks to original order
+                val re = currentBlocks.map { it.toBuilder().setCurrentIndex(it.originalIndex).build() }
+                currentBlocks = reindexCurrentIndices(re, currentDeleted).toMutableList()
             }
 
-            else -> {}
+            else -> { /* ignore */ }
         }
+
+        val newHistory = EditHistoryProto.EditHistory.newBuilder()
+            .addAllEntries(editHistory.entriesList.dropLast(1))
+            .build()
 
         return Triple(currentBlocks, currentDeleted, newHistory)
     }
+
 
 }
