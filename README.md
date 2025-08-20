@@ -1,4 +1,4 @@
-# Trusted Mobile Apps
+# Trusted Audio Editing
 
 An Android app for recording and **verifiably editing** WAV audio. Every change is tracked, deletions are provable, and the final file carries cryptographic proofs (Merkle root + optional OpenPGP signature) so you can audit authenticity end-to-end.
 
@@ -19,11 +19,17 @@ An Android app for recording and **verifiably editing** WAV audio. Every change 
 
 ## Project Structure (high level)
 
-- `audio/` – WAV IO, custom RIFF chunks, block splitting/merging.
+- `audio/` – WAV IO, custom RIFF chunks, block splitting/merging, metadata collection, edit history logic.
+- `components/` – Bottombar and WaveFormView.
+- `navigation/` – Logic for Navigation.
 - `cryptography/`
     - `MerkleHasher` – computes SHA-256 Merkle roots.
     - `WavBlockDecrypter` / `…Encrypter` – password-based AES for deleted blocks.
     - `DigitalSignatureUtils` – OpenPGP (PGPainless) signing/verification.
+- `screens/`
+    - `Editing` – Main editing screen.
+    - `Debug` – Editing with additional details but worse user experience.
+    - `RecordAudioScreen` – Main screen for recording and importing audio.
 - `protobuf/` – `.proto` definitions for:
     - `WavBlock` and related messages (edit history, metadata).
 
@@ -34,6 +40,7 @@ An Android app for recording and **verifiably editing** WAV audio. Every change 
 Standard RIFF/WAVE header + **extra custom chunks**:
 
 - `data` — concatenated **length-delimited** `WavBlock` protobuf messages (each block holds original PCM or marks a deletion).
+- `meta` — collected Metadata about recording.
 - `omrh` — “Open Merkle Root Hash” (32-byte SHA-256 Merkle root).
 - `edit` — serialized `EditHistory` protobuf (append-only log of actions).
 - `dsig` — **detached OpenPGP signature** over the logical audio payload + header fields + `omrh` (so signature binds the Merkle root).
