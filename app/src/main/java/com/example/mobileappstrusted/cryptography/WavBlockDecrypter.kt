@@ -58,6 +58,8 @@ object WavBlockDecrypter {
                         .setIsDeleted(false)
                         .clearUndeletedHash()
                         .setIsEncrypted(false)
+                        .setCurrentIndex(block.currentIndex)
+                        .setOriginalIndex(block.originalIndex)
                         .build()
                 } else {
                     block
