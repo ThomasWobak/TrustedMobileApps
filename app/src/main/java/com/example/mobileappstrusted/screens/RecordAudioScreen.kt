@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.media.MediaPlayer
 import android.net.Uri
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -34,6 +35,7 @@ import com.example.mobileappstrusted.audio.RecordingUtils
 import com.example.mobileappstrusted.audio.WavUtils.extractAmplitudesFromWav
 import com.example.mobileappstrusted.audio.WavUtils.writeBlocksToTempFile
 import com.example.mobileappstrusted.components.WaveformViewEditing
+import com.example.mobileappstrusted.cryptography.DigitalSignatureUtils
 import com.example.mobileappstrusted.protobuf.WavBlockProtos
 import java.io.File
 
@@ -325,11 +327,16 @@ fun RecordAudioScreen(onRecordingComplete: (String) -> Unit) {
 
                 Button(
                     onClick = {
-                        utils.finishRecordingAndGoToEdit(
-                            lastTempFile = lastTempFile,
-                            onRecordingComplete = onRecordingComplete,
-                            setShouldClearState = { shouldClearState = it }
-                        )
+                        if( DigitalSignatureUtils.isPrivateKeyStored(context)) {
+                            utils.finishRecordingAndGoToEdit(
+                                lastTempFile = lastTempFile,
+                                onRecordingComplete = onRecordingComplete,
+                                setShouldClearState = { shouldClearState = it }
+                            )
+                        }
+                        else {
+                            Toast.makeText(context, "Provide a private key before editing recordings.", Toast.LENGTH_SHORT).show()
+                        }
                     },
                     modifier = Modifier
                         .fillMaxWidth()
